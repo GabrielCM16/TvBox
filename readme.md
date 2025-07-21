@@ -1,9 +1,10 @@
-python -m venv .env
-source .env/bin/activate 
+```python -m venv .env source .env/bin/activate ```
 
 
 instalar requeriments.txt
-pip install -r requirements.txt
+
+```pip install -r requirements.txt```
 
 sudo apt update
-xargs -a apt-packages.txt sudo apt install -y
+
+```xargs -a apt-packages.txt sudo apt install -y```
