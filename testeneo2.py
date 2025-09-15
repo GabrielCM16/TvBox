@@ -1,4 +1,5 @@
 import os
+import time
 
 # Define a placa antes de importar NeoPixel
 os.environ["BLINKA_FORCEBOARD"] = "ROC-RK3328-CC"
@@ -31,12 +32,16 @@ strip.write()
 print("Todos os LEDs apagados")
 
 # Acende alguns LEDs fixos
-print("Acendendo LEDs: 0-vermelho, 1-verde, 8-azul, 9-amarelo")
-strip[0] = (255, 0, 0)    # vermelho
-strip[1] = (0, 255, 0)    # verde
-strip[8] = (0, 0, 255)    # azul
-strip[9] = (255, 255, 0)  # amarelo
-strip.write()
-print("LEDs atualizados com sucesso!")
+while True:
+    print("Acendendo LEDs: 0-vermelho, 1-verde, 8-azul, 9-amarelo")
+    strip[0] = (255, 0, 0)    # vermelho
+    time.sleep(0.5)  # pausa de 100ms entre cada LED
+    strip[1] = (0, 255, 0)    # verde
+    time.sleep(0.5)  # pausa de 100ms entre cada LED
+    strip[8] = (0, 0, 255)    # azul
+    time.sleep(0.5)  # pausa de 100ms entre cada LED
+    strip[9] = (255, 255, 0)  # amarelo
+    strip.write()
+    print("LEDs atualizados com sucesso!")
 
 print("Teste básico concluído.")
