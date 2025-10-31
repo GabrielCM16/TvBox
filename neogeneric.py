@@ -1,42 +1,48 @@
-import os
 import time
+# REMOVA as linhas os.environ para permitir a inicialização genérica!
+
+# Importe o objeto 'Pin' genérico
 from adafruit_blinka.microcontroller.generic_linux.libgpiod_pin import Pin
 import neopixel
 
-# Força o Blinka para sua placa
-os.environ["BLINKA_FORCEBOARD"] = "ROC-RK3328-CC"
-os.environ["BLINKA_FORCECHIP"] = "RK3328"
+# --- Configurações ---
+# Nós sabemos que este pino funciona graças ao seu teste com blink.py!
+PIXEL_PIN = Pin((1, 10)) 
+PIXEL_COUNT = 64
+BRIGHTNESS = 0.05
 
-PIXEL_PIN = Pin((1,10))  # Seu pino GPIO 42
-PIXEL_COUNT = 64         # Matriz 8x8
-BRILHO = 0.2             # Ajuste de brilho (0 a 1)
+# --- Inicialização ---
+print("Inicializando NeoPixel no modo genérico Linux...")
+print(f"Pino a ser usado: (chip=1, linha=10)")
 
-strip = neopixel.NeoPixel(
-    PIXEL_PIN,
-    PIXEL_COUNT,
-    brightness=BRILHO,
-    auto_write=False,
-    pixel_order=neopixel.GRB
-)
+try:
+    strip = neopixel.NeoPixel(
+        PIXEL_PIN,
+        PIXEL_COUNT,
+        brightness=BRIGHTNESS,
+        auto_write=False,
+        pixel_order=neopixel.GRB
+    )
+    print("✅ Sucesso! NeoPixel inicializado.")
 
-# Função para converter coordenadas (linha, coluna) para índice linear
-def pos(linha, coluna):
-    return linha * 8 + coluna
-
-# Apaga todos os LEDs
-strip.fill((0, 0, 0))
-strip.show()
-
-# Exemplo: acende 3 LEDs em posições diferentes da matriz
-strip[pos(0, 0)] = (255, 0, 0)  # Vermelho canto superior esquerdo
-strip[pos(3, 4)] = (0, 255, 0)  # Verde no meio da matriz
-strip[pos(7, 7)] = (0, 0, 255)  # Azul canto inferior direito
-strip.show()
-
-# Exemplo simples de animação: percorre a matriz acendendo LEDs
-while True:
-    for i in range(PIXEL_COUNT):
+    # --- Execução do Teste ---
+    print("Iniciando animação de teste...")
+    while True:
+        # Acende alguns LEDs
+        print("Acendendo LEDs com cores...")
+        strip[0] = (255, 0, 0)  # Vermelho
+        strip[1] = (0, 255, 0)  # Verde
+        strip[8] = (0, 0, 255)  # Azul
+        strip.write()
+        time.sleep(1.5)
+        
+        # Apaga os LEDs
+        print("Apagando LEDs...")
         strip.fill((0, 0, 0))
-        strip[i] = (255, 255, 0)  # Amarelo
-        strip.show()
-        time.sleep(0.1)
+        strip.write()
+        time.sleep(1.5)
+
+except Exception as e:
+    print(f"\n❌ ERRO AO INICIALIZAR NEOPIXEL: {e}")
+    print("\nIsso pode acontecer se a biblioteca NeoPixel genérica ainda tiver problemas.")
+    print("Verifique se está executando com 'sudo'.")
