@@ -2,6 +2,8 @@ import serial
 import serial.tools.list_ports
 import time
 import sys
+import tty      # Nativo do Linux
+import termios  # Nativo do Linux
 
 # =========================
 # CONFIGURAÇÕES
@@ -11,8 +13,22 @@ MATRIZ_LINHAS = 8
 MATRIZ_COLUNAS = 8
 
 # Cores (RRRGGGBBB + I)
-COR_JOGADOR = "0002550009"   # verde
-COR_FIXO    = "2550000009"   # vermelho
+COR_JOGADOR = "0002550001"   # verde
+COR_FIXO    = "2550000001"   # vermelho
+
+# =========================
+# FUNÇÃO PARA LER TECLA (LINUX)
+# =========================
+
+def getch():
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(sys.stdin.fileno())
+        ch = sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch
 
 # =========================
 # DETECÇÃO DO ARDUINO
@@ -59,8 +75,8 @@ def ler_retorno():
 # =========================
 
 print("\n=== JOGO MATRIZ LED ===")
-print("Use W A S D + Enter para mover")
-print("EXIT para sair")
+print("Controle: W A S D (Direto, sem Enter)")
+print("Pressione 'Q' para sair")
 print("=======================\n")
 
 # Limpa matriz
@@ -84,12 +100,9 @@ ler_retorno()
 
 try:
     while True:
-        cmd = input(">> ").strip().upper()
+        cmd = getch().upper()
 
-        if not cmd:
-            continue
-
-        if cmd == "EXIT":
+        if cmd == "Q" or cmd == "X":
             break
 
         nova_linha = linha
@@ -104,12 +117,11 @@ try:
         elif cmd == "D":
             nova_coluna += 1
         else:
-            print("[WARN] Comando inválido")
+            # Ignora qualquer outra tecla silenciosamente
             continue
 
         # valida limites
         if not (0 <= nova_linha < MATRIZ_LINHAS and 0 <= nova_coluna < MATRIZ_COLUNAS):
-            print("[INFO] Fora da matriz")
             continue
 
         # atualiza posição
@@ -123,5 +135,6 @@ except KeyboardInterrupt:
     pass
 
 finally:
+    ser.write(("CL\n").encode())
     ser.close()
     print("\n[INFO] Conexão encerrada")
