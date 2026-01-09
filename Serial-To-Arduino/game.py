@@ -11,8 +11,8 @@ MATRIZ_LINHAS = 8
 MATRIZ_COLUNAS = 8
 
 # Cores (RRRGGGBBB + I)
-COR_JOGADOR = "000255000"   # verde
-COR_FIXO    = "255000000"   # vermelho
+COR_JOGADOR = "0002550009"   # verde
+COR_FIXO    = "2550000009"   # vermelho
 
 # =========================
 # DETECÇÃO DO ARDUINO
