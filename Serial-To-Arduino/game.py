@@ -45,12 +45,21 @@ def detectar_arduino():
 porta = detectar_arduino()
 
 if not porta:
-    print("[ERRO] Arduino não encontrado")
-    sys.exit(1)
+    print("[ERRO] Arduino não encontrado \n-- Usando porta padrão")
+    porta = "/dev/ttyS2" # portas rx tx da placa da tv box
+    #sys.exit(1)
 
 print(f"[OK] Arduino detectado em {porta}")
 
-ser = serial.Serial(porta, 9600, timeout=0.1)
+ser = serial.Serial(
+    porta,
+    115200,
+    timeout=0.05,
+    write_timeout=0.05,
+    exclusive=True
+)
+
+
 time.sleep(2)
 
 # =========================
@@ -59,16 +68,19 @@ time.sleep(2)
 
 def apagar_led(l, c):
     ser.write(f"{l}{c}\n".encode())
+    ser.flush()
 
 def acender_led(l, c, cor):
     ser.write(f"{l}{c}{cor}\n".encode())
+    ser.flush()
+
 
 def ler_retorno():
-    time.sleep(0.05)
-    while ser.in_waiting:
+    while ser.in_waiting > 0:
         resp = ser.readline().decode(errors="ignore").strip()
         if resp:
             print(f"[ARDUINO] {resp}")
+
 
 # =========================
 # INICIALIZAÇÃO
@@ -130,6 +142,8 @@ try:
         acender_led(linha, coluna, COR_JOGADOR)
 
         ler_retorno()
+        time.sleep(0.02)  # 20ms
+
 
 except KeyboardInterrupt:
     pass

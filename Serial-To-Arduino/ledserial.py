@@ -14,7 +14,8 @@ porta = detectar_arduino()
 
 if not porta:
     print("Arduino não encontrado")
-    sys.exit(1)
+    porta = "/dev/ttyS2" # portas rx tx da placa da tv box
+    #sys.exit(1)
 
 print(f"Arduino em {porta}")
 
