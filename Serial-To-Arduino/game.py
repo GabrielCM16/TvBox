@@ -2,8 +2,9 @@ import serial
 import serial.tools.list_ports
 import time
 import sys
-import tty      # Nativo do Linux
-import termios  # Nativo do Linux
+import tty
+import termios
+import random
 
 # =========================
 # CONFIGURAÇÕES
@@ -13,22 +14,25 @@ MATRIZ_LINHAS = 8
 MATRIZ_COLUNAS = 8
 
 # Cores (RRRGGGBBB + I)
-COR_JOGADOR = "0002550001"   # verde
-COR_FIXO    = "2550000001"   # vermelho
+COR_JOGADOR     = "0002550001"  # verde
+COR_FIXO        = "2550000001"  # vermelho
+COR_SELECIONADO = "0000002551"  # azul
+COR_VITORIA     = "2552552551"  # branco
+
+QTD_PARES = 4
 
 # =========================
-# FUNÇÃO PARA LER TECLA (LINUX)
+# TECLADO (LINUX)
 # =========================
 
 def getch():
     fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
+    old = termios.tcgetattr(fd)
     try:
-        tty.setraw(sys.stdin.fileno())
-        ch = sys.stdin.read(1)
+        tty.setraw(fd)
+        return sys.stdin.read(1)
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    return ch
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 # =========================
 # DETECÇÃO DO ARDUINO
@@ -36,34 +40,21 @@ def getch():
 
 def detectar_arduino():
     for p in serial.tools.list_ports.comports():
-        dev = p.device.lower()
+        d = p.device.lower()
         desc = (p.description or "").lower()
-        if "acm" in dev or "arduino" in desc or "cdc" in desc:
+        if "acm" in d or "arduino" in desc or "cdc" in desc:
             return p.device
     return None
 
-porta = detectar_arduino()
+porta = detectar_arduino() or "/dev/ttyS2"
 
-if not porta:
-    print("[ERRO] Arduino não encontrado \n-- Usando porta padrão")
-    porta = "/dev/ttyS2" # portas rx tx da placa da tv box
-    #sys.exit(1)
+print(f"[OK] Porta serial: {porta}")
 
-print(f"[OK] Arduino detectado em {porta}")
-
-ser = serial.Serial(
-    porta,
-    115200,
-    timeout=0.05,
-    write_timeout=0.05,
-    exclusive=True
-)
-
-
+ser = serial.Serial(porta, 115200, timeout=0.05, write_timeout=0.05, exclusive=True)
 time.sleep(2)
 
 # =========================
-# FUNÇÕES DE LED
+# LEDS
 # =========================
 
 def apagar_led(l, c):
@@ -74,37 +65,57 @@ def acender_led(l, c, cor):
     ser.write(f"{l}{c}{cor}\n".encode())
     ser.flush()
 
+def limpar_matriz():
+    ser.write(b"CL\n")
+    ser.flush()
 
-def ler_retorno():
-    while ser.in_waiting > 0:
-        resp = ser.readline().decode(errors="ignore").strip()
-        if resp:
-            print(f"[ARDUINO] {resp}")
+# =========================
+# LÓGICA DO JOGO
+# =========================
 
+def sortear_pares(qtd):
+    total = MATRIZ_LINHAS * MATRIZ_COLUNAS
+    pos = random.sample(range(total), qtd * 2)
+    pares = set()
+
+    for p in pos:
+        l = p // MATRIZ_COLUNAS
+        c = p % MATRIZ_COLUNAS
+        pares.add((l, c))
+        acender_led(l, c, COR_FIXO)
+
+    return pares
+
+def animacao_vitoria():
+    for _ in range(3):
+        limpar_matriz()
+        time.sleep(0.15)
+        for l in range(MATRIZ_LINHAS):
+            for c in range(MATRIZ_COLUNAS):
+                acender_led(l, c, COR_VITORIA)
+        time.sleep(0.2)
+
+    limpar_matriz()
+
+    for l in range(MATRIZ_LINHAS):
+        for c in range(MATRIZ_COLUNAS):
+            acender_led(l, c, COR_FIXO)
+            time.sleep(0.01)
 
 # =========================
 # INICIALIZAÇÃO
 # =========================
 
 print("\n=== JOGO MATRIZ LED ===")
-print("Controle: W A S D (Direto, sem Enter)")
-print("Pressione 'Q' para sair")
-print("=======================\n")
+print("W A S D -> mover | X -> selecionar | Q -> sair\n")
 
-# Limpa matriz
-ser.write(b"CL\n")
-ler_retorno()
+limpar_matriz()
 
-# LEDs fixos
-acender_led(5, 5, COR_FIXO)
-acender_led(7, 7, COR_FIXO)
-ler_retorno()
+leds_fixos = sortear_pares(QTD_PARES)
+selecionados = set()
 
-# Jogador
-linha = 0
-coluna = 0
+linha, coluna = 0, 0
 acender_led(linha, coluna, COR_JOGADOR)
-ler_retorno()
 
 # =========================
 # LOOP PRINCIPAL
@@ -114,41 +125,49 @@ try:
     while True:
         cmd = getch().upper()
 
-        if cmd == "Q" or cmd == "X":
+        if cmd == "Q":
             break
 
-        nova_linha = linha
-        nova_coluna = coluna
+        if cmd == "X":
+            if (linha, coluna) in leds_fixos:
+                selecionados.add((linha, coluna))
+                acender_led(linha, coluna, COR_SELECIONADO)
 
-        if cmd == "W":
-            nova_linha -= 1
-        elif cmd == "S":
-            nova_linha += 1
-        elif cmd == "A":
-            nova_coluna -= 1
-        elif cmd == "D":
-            nova_coluna += 1
+                if selecionados == leds_fixos:
+                    animacao_vitoria()
+                    break
+            continue
+
+        nl, nc = linha, coluna
+
+        if cmd == "W": nl -= 1
+        elif cmd == "S": nl += 1
+        elif cmd == "A": nc -= 1
+        elif cmd == "D": nc += 1
         else:
-            # Ignora qualquer outra tecla silenciosamente
             continue
 
-        # valida limites
-        if not (0 <= nova_linha < MATRIZ_LINHAS and 0 <= nova_coluna < MATRIZ_COLUNAS):
+        if not (0 <= nl < MATRIZ_LINHAS and 0 <= nc < MATRIZ_COLUNAS):
             continue
 
-        # atualiza posição
-        apagar_led(linha, coluna)
-        linha, coluna = nova_linha, nova_coluna
-        acender_led(linha, coluna, COR_JOGADOR)
+        if (linha, coluna) not in selecionados:
+            apagar_led(linha, coluna)
 
-        ler_retorno()
-        time.sleep(0.02)  # 20ms
+        linha, coluna = nl, nc
 
+        if (linha, coluna) in selecionados:
+            acender_led(linha, coluna, COR_SELECIONADO)
+        elif (linha, coluna) in leds_fixos:
+            acender_led(linha, coluna, COR_FIXO)
+        else:
+            acender_led(linha, coluna, COR_JOGADOR)
+
+        time.sleep(0.02)
 
 except KeyboardInterrupt:
     pass
 
 finally:
-    ser.write(("CL\n").encode())
+    limpar_matriz()
     ser.close()
-    print("\n[INFO] Conexão encerrada")
+    print("[INFO] Jogo encerrado")
