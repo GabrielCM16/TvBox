@@ -7,7 +7,7 @@ import termios
 import random
 
 # =========================
-# CONFIGURAÇÕES (Mantidas)
+# CONFIGURAÇÕES
 # =========================
 MATRIZ_LINHAS = 8
 MATRIZ_COLUNAS = 8
@@ -18,11 +18,11 @@ COR_SELECIONADO = "0000002551"  # azul
 COR_DERROTA     = "2551280001"  # laranja
 COR_VITORIA     = "2552552551"  # branco
 
-QTD_LEDS_MEMORIA = 6
+QTD_LEDS_MEMORIA = 2
 MAX_ERROS = 3
 
 # =========================
-# TECLADO (LINUX) - Mantido
+# FUNÇÕES DE APOIO
 # =========================
 def getch():
     fd = sys.stdin.fileno()
@@ -33,9 +33,6 @@ def getch():
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-# =========================
-# ARDUINO - Mantido
-# =========================
 def detectar_arduino():
     for p in serial.tools.list_ports.comports():
         dev = p.device.lower()
@@ -48,9 +45,6 @@ porta = detectar_arduino() or "/dev/ttyS2"
 ser = serial.Serial(porta, 115200, timeout=0.05, write_timeout=0.05, exclusive=True)
 time.sleep(2)
 
-# =========================
-# LEDS - Mantido
-# =========================
 def apagar_led(l, c):
     ser.write(f"{l}{c}\n".encode())
     ser.flush()
@@ -64,16 +58,16 @@ def limpar_matriz():
     ser.flush()
 
 # =========================
-# ANIMAÇÕES - Mantido
+# ANIMAÇÕES
 # =========================
 def animacao_derrota():
     for _ in range(2):
         for l in range(MATRIZ_LINHAS):
             for c in range(MATRIZ_COLUNAS):
                 acender_led(l, c, COR_DERROTA)
-        time.sleep(0.2)
-        limpar_matriz()
         time.sleep(0.15)
+        limpar_matriz()
+        time.sleep(0.1)
 
 def animacao_game_over():
     for _ in range(3):
@@ -95,85 +89,69 @@ def animacao_vitoria():
     limpar_matriz()
 
 # =========================
-# JOGO
+# LÓGICA DE JOGO
 # =========================
-def sortear_leds(qtd):
-    total = MATRIZ_LINHAS * MATRIZ_COLUNAS
-    posicoes = random.sample(range(total), qtd)
-    leds = set()
-    for p in posicoes:
-        l = p // MATRIZ_COLUNAS
-        c = p % MATRIZ_COLUNAS
-        leds.add((l, c))
-        acender_led(l, c, COR_MEMORIA)
-    return leds
+print("\n=== JOGO MATRIZ LED (MODO RESET) ===")
+print("W A S D mover | X marcar | Q sair\n")
 
-def mostrar_estado_atual(leds_memoria, selecionados, l_atual, c_atual):
-    """Atualiza a visão da matriz sem resetar o jogo todo"""
-    limpar_matriz()
-    # Desenha os que já foram marcados corretamente
-    for (l, c) in selecionados:
-        if (l, c) in leds_memoria:
-            acender_led(l, c, COR_SELECIONADO)
-    # Desenha a posição atual do jogador
-    acender_led(l_atual, c_atual, COR_JOGADOR)
-
-# =========================
-# INICIALIZAÇÃO
-# =========================
-print("\n=== JOGO MATRIZ LED ===")
-print("Memorize os LEDs!")
+# Sorteio inicial
 limpar_matriz()
+posicoes = random.sample(range(MATRIZ_LINHAS * MATRIZ_COLUNAS), QTD_LEDS_MEMORIA)
+leds_memoria = {(p // MATRIZ_COLUNAS, p % MATRIZ_COLUNAS) for p in posicoes}
 
-leds_memoria = sortear_leds(QTD_LEDS_MEMORIA)
-selecionados = set()
 acertos = set()
 erros_totais = 0
 linha, coluna = 0, 0
 jogo_iniciado = False
 
-# =========================
-# LOOP PRINCIPAL
-# =========================
+# Mostra memória inicial
+for (l, c) in leds_memoria:
+    acender_led(l, c, COR_MEMORIA)
+acender_led(linha, coluna, COR_JOGADOR)
+
 try:
     while True:
         cmd = getch().upper()
 
-        if cmd == "Q":
-            break
+        if cmd == "Q": break
 
-        # Início do jogo (esconde a memória ao começar a mover)
+        # Começou a jogar: apaga a memória
         if not jogo_iniciado and cmd in ("W", "A", "S", "D", "X"):
             limpar_matriz()
             acender_led(linha, coluna, COR_JOGADOR)
             jogo_iniciado = True
 
         if cmd == "X":
-            if (linha, coluna) not in selecionados:
-                selecionados.add((linha, coluna))
-                
-                # VERIFICA SE ACERTOU
-                if (linha, coluna) in leds_memoria:
+            if (linha, coluna) in leds_memoria:
+                if (linha, coluna) not in acertos:
                     acertos.add((linha, coluna))
                     acender_led(linha, coluna, COR_SELECIONADO)
                     
-                    # VITÓRIA: Compara apenas os acertos com a memória sorteada
+                    # Vitória: acertou todos os sorteados
                     if acertos == leds_memoria:
                         animacao_vitoria()
                         break
-                else:
-                    # ERRO
-                    erros_totais += 1
-                    animacao_derrota()
-                    
-                    if erros_totais >= MAX_ERROS:
-                        print(f"Game Over! Erros: {erros_totais}")
-                        animacao_game_over()
-                        break
-                    
-                    # Se ainda tem vidas, mostra onde errou e redesenha o tabuleiro
-                    print(f"Errou! {erros_totais}/{MAX_ERROS}")
-                    mostrar_estado_atual(leds_memoria, selecionados, linha, coluna)
+            else:
+                # ERROU: Reset Total
+                erros_totais += 1
+                animacao_derrota()
+                
+                if erros_totais >= MAX_ERROS:
+                    print("GAME OVER!")
+                    animacao_game_over()
+                    break
+                
+                print(f"Erro {erros_totais}/{MAX_ERROS}! Resetando...")
+                # Reseta o progresso da rodada
+                acertos.clear()
+                linha, coluna = 0, 0
+                jogo_iniciado = False
+                
+                # Mostra tudo de novo para o jogador decorar
+                limpar_matriz()
+                for (l, c) in leds_memoria:
+                    acender_led(l, c, COR_MEMORIA)
+                acender_led(linha, coluna, COR_JOGADOR)
             continue
 
         # MOVIMENTAÇÃO
@@ -184,32 +162,22 @@ try:
         elif cmd == "D": nc += 1
         else: continue
 
-        # Bloqueio de borda
         if 0 <= nl < MATRIZ_LINHAS and 0 <= nc < MATRIZ_COLUNAS:
-            # Apaga o rastro (se não for um LED já selecionado)
-            if (linha, coluna) not in selecionados:
+            # Apaga onde o jogador estava (se não era um acerto azul)
+            if (linha, coluna) not in acertos:
                 apagar_led(linha, coluna)
             else:
-                # Se era um LED marcado, garante que ele continue azul
                 acender_led(linha, coluna, COR_SELECIONADO)
 
             linha, coluna = nl, nc
-
-            # Desenha a nova posição do jogador
-            if (linha, coluna) in selecionados:
-                # Se passar por cima de um já marcado, você pode mudar a cor ou manter azul
-                acender_led(linha, coluna, COR_JOGADOR) 
-            else:
-                acender_led(linha, coluna, COR_JOGADOR)
+            # Mostra o jogador na nova posição
+            acender_led(linha, coluna, COR_JOGADOR)
 
         time.sleep(0.01)
 
 except KeyboardInterrupt:
     pass
 
-# =========================
-# FINALIZAÇÃO
-# =========================
 limpar_matriz()
 ser.close()
 print("[INFO] Jogo encerrado")
