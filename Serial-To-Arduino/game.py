@@ -13,13 +13,12 @@ import random
 MATRIZ_LINHAS = 8
 MATRIZ_COLUNAS = 8
 
-# Cores (RRRGGGBBB + I)
 COR_JOGADOR     = "0002550001"  # verde
 COR_FIXO        = "2550000001"  # vermelho
 COR_SELECIONADO = "0000002551"  # azul
 COR_VITORIA     = "2552552551"  # branco
 
-QTD_PARES = 4
+QTD_LEDS_MEMORIA = 4
 
 # =========================
 # TECLADO (LINUX)
@@ -35,21 +34,18 @@ def getch():
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 # =========================
-# DETECÇÃO DO ARDUINO
+# ARDUINO
 # =========================
 
 def detectar_arduino():
     for p in serial.tools.list_ports.comports():
-        d = p.device.lower()
+        dev = p.device.lower()
         desc = (p.description or "").lower()
-        if "acm" in d or "arduino" in desc or "cdc" in desc:
+        if "acm" in dev or "arduino" in desc or "cdc" in desc:
             return p.device
     return None
 
 porta = detectar_arduino() or "/dev/ttyS2"
-
-print(f"[OK] Porta serial: {porta}")
-
 ser = serial.Serial(porta, 115200, timeout=0.05, write_timeout=0.05, exclusive=True)
 time.sleep(2)
 
@@ -70,21 +66,21 @@ def limpar_matriz():
     ser.flush()
 
 # =========================
-# LÓGICA DO JOGO
+# JOGO
 # =========================
 
-def sortear_pares(qtd):
+def sortear_leds(qtd):
     total = MATRIZ_LINHAS * MATRIZ_COLUNAS
-    pos = random.sample(range(total), qtd * 2)
-    pares = set()
+    posicoes = random.sample(range(total), qtd)
+    leds = set()
 
-    for p in pos:
+    for p in posicoes:
         l = p // MATRIZ_COLUNAS
         c = p % MATRIZ_COLUNAS
-        pares.add((l, c))
+        leds.add((l, c))
         acender_led(l, c, COR_FIXO)
 
-    return pares
+    return leds
 
 def animacao_vitoria():
     for _ in range(3):
@@ -97,24 +93,22 @@ def animacao_vitoria():
 
     limpar_matriz()
 
-    for l in range(MATRIZ_LINHAS):
-        for c in range(MATRIZ_COLUNAS):
-            acender_led(l, c, COR_FIXO)
-            time.sleep(0.01)
-
 # =========================
 # INICIALIZAÇÃO
 # =========================
 
 print("\n=== JOGO MATRIZ LED ===")
-print("W A S D -> mover | X -> selecionar | Q -> sair\n")
+print("Memorize os LEDs vermelhos")
+print("W A S D mover | X marcar | Q sair\n")
 
 limpar_matriz()
 
-leds_fixos = sortear_pares(QTD_PARES)
+leds_memoria = sortear_leds(QTD_LEDS_MEMORIA)
 selecionados = set()
 
 linha, coluna = 0, 0
+jogo_iniciado = False
+
 acender_led(linha, coluna, COR_JOGADOR)
 
 # =========================
@@ -128,12 +122,18 @@ try:
         if cmd == "Q":
             break
 
+        # PRIMEIRO MOVIMENTO → LIMPA MEMÓRIA
+        if not jogo_iniciado and cmd in ("W", "A", "S", "D"):
+            limpar_matriz()
+            acender_led(linha, coluna, COR_JOGADOR)
+            jogo_iniciado = True
+
         if cmd == "X":
-            if (linha, coluna) in leds_fixos:
+            if (linha, coluna) in leds_memoria:
                 selecionados.add((linha, coluna))
                 acender_led(linha, coluna, COR_SELECIONADO)
 
-                if selecionados == leds_fixos:
+                if selecionados == leds_memoria:
                     animacao_vitoria()
                     break
             continue
@@ -157,8 +157,6 @@ try:
 
         if (linha, coluna) in selecionados:
             acender_led(linha, coluna, COR_SELECIONADO)
-        elif (linha, coluna) in leds_fixos:
-            acender_led(linha, coluna, COR_FIXO)
         else:
             acender_led(linha, coluna, COR_JOGADOR)
 
