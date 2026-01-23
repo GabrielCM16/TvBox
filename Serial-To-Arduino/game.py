@@ -14,11 +14,13 @@ MATRIZ_LINHAS = 8
 MATRIZ_COLUNAS = 8
 
 COR_JOGADOR     = "0002550001"  # verde
-COR_FIXO        = "2550000001"  # vermelho
+COR_MEMORIA     = "2550000001"  # vermelho
 COR_SELECIONADO = "0000002551"  # azul
+COR_DERROTA     = "2551280001"  # laranja
 COR_VITORIA     = "2552552551"  # branco
 
-QTD_LEDS_MEMORIA = 4
+QTD_LEDS_MEMORIA = 6
+MAX_ERROS = 3
 
 # =========================
 # TECLADO (LINUX)
@@ -66,6 +68,38 @@ def limpar_matriz():
     ser.flush()
 
 # =========================
+# ANIMAÇÕES
+# =========================
+
+def animacao_derrota():
+    for _ in range(2):
+        for l in range(MATRIZ_LINHAS):
+            for c in range(MATRIZ_COLUNAS):
+                acender_led(l, c, COR_DERROTA)
+        time.sleep(0.2)
+        limpar_matriz()
+        time.sleep(0.15)
+
+def animacao_game_over():
+    for _ in range(3):
+        for l in range(MATRIZ_LINHAS):
+            for c in range(MATRIZ_COLUNAS):
+                acender_led(l, c, COR_DERROTA)
+        time.sleep(0.3)
+        limpar_matriz()
+        time.sleep(0.2)
+
+def animacao_vitoria():
+    for _ in range(3):
+        limpar_matriz()
+        time.sleep(0.15)
+        for l in range(MATRIZ_LINHAS):
+            for c in range(MATRIZ_COLUNAS):
+                acender_led(l, c, COR_VITORIA)
+        time.sleep(0.2)
+    limpar_matriz()
+
+# =========================
 # JOGO
 # =========================
 
@@ -78,94 +112,107 @@ def sortear_leds(qtd):
         l = p // MATRIZ_COLUNAS
         c = p % MATRIZ_COLUNAS
         leds.add((l, c))
-        acender_led(l, c, COR_FIXO)
+        acender_led(l, c, COR_MEMORIA)
 
     return leds
 
-def animacao_vitoria():
-    for _ in range(3):
-        limpar_matriz()
-        time.sleep(0.15)
-        for l in range(MATRIZ_LINHAS):
-            for c in range(MATRIZ_COLUNAS):
-                acender_led(l, c, COR_VITORIA)
-        time.sleep(0.2)
-
+def mostrar_memoria(leds):
     limpar_matriz()
+    for (l, c) in leds:
+        acender_led(l, c, COR_MEMORIA)
 
 # =========================
 # INICIALIZAÇÃO
 # =========================
 
 print("\n=== JOGO MATRIZ LED ===")
-print("Memorize os LEDs vermelhos")
+print("Memorize os LEDs")
 print("W A S D mover | X marcar | Q sair\n")
 
 limpar_matriz()
 
 leds_memoria = sortear_leds(QTD_LEDS_MEMORIA)
-selecionados = set()
 
-linha, coluna = 0, 0
-jogo_iniciado = False
-
-acender_led(linha, coluna, COR_JOGADOR)
+erros_totais = 0
 
 # =========================
-# LOOP PRINCIPAL
+# LOOP DE RODADAS
 # =========================
 
-try:
-    while True:
-        cmd = getch().upper()
+while True:
+    selecionados = set()
+    jogo_iniciado = False
 
-        if cmd == "Q":
-            break
+    linha, coluna = 0, 0
+    acender_led(linha, coluna, COR_JOGADOR)
 
-        # PRIMEIRO MOVIMENTO → LIMPA MEMÓRIA
-        if not jogo_iniciado and cmd in ("W", "A", "S", "D"):
-            limpar_matriz()
-            acender_led(linha, coluna, COR_JOGADOR)
-            jogo_iniciado = True
+    try:
+        while True:
+            cmd = getch().upper()
 
-        if cmd == "X":
-            if (linha, coluna) in leds_memoria:
-                selecionados.add((linha, coluna))
+            if cmd == "Q":
+                raise KeyboardInterrupt
+
+            if not jogo_iniciado and cmd in ("W", "A", "S", "D"):
+                limpar_matriz()
+                acender_led(linha, coluna, COR_JOGADOR)
+                jogo_iniciado = True
+
+            if cmd == "X":
+                if (linha, coluna) not in selecionados:
+                    selecionados.add((linha, coluna))
+                    acender_led(linha, coluna, COR_SELECIONADO)
+
+                    # ERRO
+                    if (linha, coluna) not in leds_memoria:
+                        erros_totais += 1
+                        animacao_derrota()
+
+                        if erros_totais >= MAX_ERROS:
+                            animacao_game_over()
+                            raise KeyboardInterrupt
+
+                        mostrar_memoria(leds_memoria)
+                        time.sleep(1)
+                        break  # reinicia rodada
+
+                    # VITÓRIA
+                    if selecionados == leds_memoria:
+                        animacao_vitoria()
+                        raise KeyboardInterrupt
+                continue
+
+            nl, nc = linha, coluna
+
+            if cmd == "W": nl -= 1
+            elif cmd == "S": nl += 1
+            elif cmd == "A": nc -= 1
+            elif cmd == "D": nc += 1
+            else:
+                continue
+
+            if not (0 <= nl < MATRIZ_LINHAS and 0 <= nc < MATRIZ_COLUNAS):
+                continue
+
+            if (linha, coluna) not in selecionados:
+                apagar_led(linha, coluna)
+
+            linha, coluna = nl, nc
+
+            if (linha, coluna) in selecionados:
                 acender_led(linha, coluna, COR_SELECIONADO)
+            else:
+                acender_led(linha, coluna, COR_JOGADOR)
 
-                if selecionados == leds_memoria:
-                    animacao_vitoria()
-                    break
-            continue
+            time.sleep(0.02)
 
-        nl, nc = linha, coluna
+    except KeyboardInterrupt:
+        break
 
-        if cmd == "W": nl -= 1
-        elif cmd == "S": nl += 1
-        elif cmd == "A": nc -= 1
-        elif cmd == "D": nc += 1
-        else:
-            continue
+# =========================
+# FINALIZAÇÃO
+# =========================
 
-        if not (0 <= nl < MATRIZ_LINHAS and 0 <= nc < MATRIZ_COLUNAS):
-            continue
-
-        if (linha, coluna) not in selecionados:
-            apagar_led(linha, coluna)
-
-        linha, coluna = nl, nc
-
-        if (linha, coluna) in selecionados:
-            acender_led(linha, coluna, COR_SELECIONADO)
-        else:
-            acender_led(linha, coluna, COR_JOGADOR)
-
-        time.sleep(0.02)
-
-except KeyboardInterrupt:
-    pass
-
-finally:
-    limpar_matriz()
-    ser.close()
-    print("[INFO] Jogo encerrado")
+limpar_matriz()
+ser.close()
+print("[INFO] Jogo encerrado")
