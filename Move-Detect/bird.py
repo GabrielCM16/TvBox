@@ -41,7 +41,7 @@ def achar_mouse():
     return best
 
 class GestureUp:
-    def __init__(self, dev: InputDevice | None):
+    def __init__(self, dev):
         self.dev = dev
         self.acc_dx = 0
         self.acc_dy = 0
