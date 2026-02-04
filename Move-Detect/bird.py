@@ -13,8 +13,8 @@ WINDOW_MS = 55
 SMOOTH = 0.35
 MAX_MAG = 40.0
 
-TRIGGER_UP = 22
-RELEASE_UP = 10
+TRIGGER_VERT = 22     # flap quando movimento vertical for forte (0..100), sem depender do sinal
+RELEASE_VERT = 10
 COOLDOWN_MS = 160
 
 def achar_mouse():
@@ -50,9 +50,10 @@ class MouseGesture:
         self.last_fire = 0.0
         self.armed = True
 
-        # últimos valores publicados (para diagnóstico)
+        # telemetria
         self.last_any = 0
-        self.last_up = 0
+        self.last_vert = 0
+        self.last_flap = False
 
         if self.dev:
             try:
@@ -86,12 +87,9 @@ class MouseGesture:
     def poll(self):
         """
         Retorna dict:
-        {
-          any_int: 0..100,
-          up_int: 0..100,
-          sm_dx, sm_dy: float,
-          flap: bool
-        }
+        any_int: 0..100 (movimento geral)
+        vert_int: 0..100 (movimento vertical abs)
+        flap: True/False
         """
         self._drain()
 
@@ -99,10 +97,10 @@ class MouseGesture:
         if (now - self.last_emit) * 1000.0 < WINDOW_MS:
             return {
                 "any_int": self.last_any,
-                "up_int": self.last_up,
+                "vert_int": self.last_vert,
+                "flap": False,
                 "sm_dx": self.sm_dx,
                 "sm_dy": self.sm_dy,
-                "flap": False,
             }
         self.last_emit = now
 
@@ -114,37 +112,30 @@ class MouseGesture:
         self.sm_dx = (1.0 - SMOOTH) * self.sm_dx + SMOOTH * dx
         self.sm_dy = (1.0 - SMOOTH) * self.sm_dy + SMOOTH * dy
 
-        mag_any = math.sqrt(self.sm_dx * self.sm_dx + self.sm_dy * self.sm_dy)
-        any_int = self._norm_0_100(mag_any)
+        any_int = self._norm_0_100(math.hypot(self.sm_dx, self.sm_dy))
+        vert_int = self._norm_0_100(abs(self.sm_dy))
 
-        up_int = 0
+        # histerese (rearma quando ficar fraco)
+        if vert_int <= RELEASE_VERT:
+            self.armed = True
+
         flap = False
-
-        # dy negativo normalmente = "subiu"
-        if self.sm_dy < 0:
-            up_int = self._norm_0_100(abs(self.sm_dy))
-
-            if up_int <= RELEASE_UP:
-                self.armed = True
-
-            if self.armed and up_int >= TRIGGER_UP:
-                if (now - self.last_fire) * 1000.0 >= COOLDOWN_MS:
-                    self.last_fire = now
-                    self.armed = False
-                    flap = True
-        else:
-            if abs(self.sm_dy) < 1:
-                self.armed = True
+        if self.armed and vert_int >= TRIGGER_VERT:
+            if (now - self.last_fire) * 1000.0 >= COOLDOWN_MS:
+                self.last_fire = now
+                self.armed = False
+                flap = True
 
         self.last_any = any_int
-        self.last_up = up_int
+        self.last_vert = vert_int
+        self.last_flap = flap
 
         return {
             "any_int": any_int,
-            "up_int": up_int,
+            "vert_int": vert_int,
+            "flap": flap,
             "sm_dx": self.sm_dx,
             "sm_dy": self.sm_dy,
-            "flap": flap,
         }
 
 # =========================
@@ -167,13 +158,12 @@ def clamp(v, a, b):
 def diag_screen(stdscr, dev, gest):
     stdscr.nodelay(True)
     stdscr.keypad(True)
-
     h, w = stdscr.getmaxyx()
 
     while True:
         stdscr.erase()
-        stdscr.addstr(0, 2, "DIAGNOSTICO DO MOUSE (antes do jogo)")
-        stdscr.addstr(1, 2, "ENTER inicia | Q sai | SPACE tambem vai pular no jogo")
+        stdscr.addstr(0, 2, "DIAGNOSTICO DO MOUSE")
+        stdscr.addstr(1, 2, "ENTER inicia | Q sai | (no jogo: SPACE pula)")
         stdscr.addstr(2, 2, "-" * (w - 4))
 
         if dev:
@@ -181,24 +171,22 @@ def diag_screen(stdscr, dev, gest):
             stdscr.addstr(5, 2, f"Nome:   {dev.name}")
         else:
             stdscr.addstr(4, 2, "Device: [NAO ENCONTRADO]")
-            stdscr.addstr(5, 2, "Dica: rode com sudo e/ou conecte o dispositivo que emula mouse")
+            stdscr.addstr(5, 2, "Dica: rode com sudo e conecte o dispositivo")
 
-        info = gest.poll() if gest else {"any_int": 0, "up_int": 0, "sm_dx": 0.0, "sm_dy": 0.0, "flap": False}
+        info = gest.poll() if gest else {"any_int": 0, "vert_int": 0, "flap": False, "sm_dx": 0, "sm_dy": 0}
 
-        stdscr.addstr(7, 2, f"any_int (0..100): {info['any_int']:3d}   (movimento geral)")
-        stdscr.addstr(8, 2, f"up_int  (0..100): {info['up_int']:3d}   (movimento UP)")
-        stdscr.addstr(10, 2, f"sm_dx: {info['sm_dx']:+8.2f}   sm_dy: {info['sm_dy']:+8.2f}")
-        stdscr.addstr(12, 2, f"flap detectado: {'SIM' if info['flap'] else 'nao'}")
-
-        stdscr.addstr(14, 2, "Ajustes relevantes:")
-        stdscr.addstr(15, 4, f"DEADZONE={DEADZONE}  TRIGGER_UP={TRIGGER_UP}  COOLDOWN_MS={COOLDOWN_MS}  MAX_MAG={MAX_MAG}")
+        stdscr.addstr(7, 2, f"any_int (0..100):  {info['any_int']:3d}")
+        stdscr.addstr(8, 2, f"vert_int(0..100):  {info['vert_int']:3d}   (abs(dy))")
+        stdscr.addstr(10,2, f"sm_dx: {info['sm_dx']:+8.2f}   sm_dy: {info['sm_dy']:+8.2f}")
+        stdscr.addstr(12,2, f"flap detectado:     {'SIM' if info['flap'] else 'nao'}")
+        stdscr.addstr(14,2, f"TRIGGER_VERT={TRIGGER_VERT}  DEADZONE={DEADZONE}  COOLDOWN_MS={COOLDOWN_MS}  MAX_MAG={MAX_MAG}")
 
         stdscr.refresh()
 
         k = stdscr.getch()
         if k in (ord('q'), ord('Q')):
             return False
-        if k in (10, 13):  # ENTER (LF/CR)
+        if k in (10, 13):  # ENTER
             return True
 
         time.sleep(0.01)
@@ -216,12 +204,11 @@ def main(stdscr):
     dev = achar_mouse()
     gest = MouseGesture(dev) if dev else None
 
-    # 1) DIAGNÓSTICO
-    ok = diag_screen(stdscr, dev, gest)
-    if not ok:
+    # 1) Diagnóstico + start manual
+    if not diag_screen(stdscr, dev, gest):
         return
 
-    # 2) JOGO
+    # 2) Jogo
     stdscr.nodelay(True)
     stdscr.keypad(True)
 
@@ -235,6 +222,11 @@ def main(stdscr):
 
     pipes = []
     spawn_t = 0.0
+
+    last_key = -1
+    last_mouse_any = 0
+    last_mouse_vert = 0
+    last_mouse_flap = False
 
     def spawn_pipe():
         min_y = top + 2
@@ -256,8 +248,10 @@ def main(stdscr):
 
     def draw():
         stdscr.erase()
-        ctrl = "mouse(UP)+SPACE" if dev else "SPACE"
-        stdscr.addstr(0, 2, f"Flappy Terminal | Score: {score} | Ctrl: {ctrl} | Q sai")
+        stdscr.addstr(0, 2, f"Flappy Terminal | Score: {score} | Q sai")
+
+        # debug (pra você ver o SPACE e o flap chegando)
+        stdscr.addstr(1, 2, f"DBG key={last_key:4d}  mouse_any={last_mouse_any:3d}  mouse_vert={last_mouse_vert:3d}  mouse_flap={'1' if last_mouse_flap else '0'}")
 
         for x in range(w):
             stdscr.addch(top, x, "-")
@@ -292,23 +286,33 @@ def main(stdscr):
         acc += frame
 
         k = stdscr.getch()
+        last_key = k
+
         if k in (ord('q'), ord('Q')):
             break
 
+        if not alive and k in (ord('r'), ord('R')):
+            bird_y = float(h // 2)
+            bird_v = 0.0
+            score = 0
+            pipes.clear()
+            spawn_t = 0.0
+            alive = True
+
         flap = False
         if alive:
-            if gest and gest.poll()["flap"]:
+            mi = gest.poll() if gest else {"any_int": 0, "vert_int": 0, "flap": False}
+            last_mouse_any = mi["any_int"]
+            last_mouse_vert = mi["vert_int"]
+            last_mouse_flap = mi["flap"]
+
+            # SPACE sempre funciona como flap
+            if k == ord(' '):
                 flap = True
-            if k == ord(' '):  # SPACE
+
+            # mouse flap também
+            if mi["flap"]:
                 flap = True
-        else:
-            if k in (ord('r'), ord('R')):
-                bird_y = float(h // 2)
-                bird_v = 0.0
-                score = 0
-                pipes.clear()
-                spawn_t = 0.0
-                alive = True
 
         while acc >= DT:
             acc -= DT
@@ -320,13 +324,13 @@ def main(stdscr):
                     flap = False
                 bird_y += bird_v * DT
 
-                # NÃO PERDE NO CHÃO: trava no chão
+                # não perde no chão: trava no chão
                 if bird_y >= bottom - 1:
                     bird_y = float(bottom - 1)
                     if bird_v > 0:
                         bird_v = 0.0
 
-                # perde no teto (mantido)
+                # perde no teto
                 if bird_y <= top + 1:
                     alive = False
                     break
