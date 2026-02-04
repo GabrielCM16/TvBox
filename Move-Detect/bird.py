@@ -6,18 +6,16 @@ from evdev import InputDevice, list_devices, ecodes
 import select
 
 # =========================
-# INPUT (mouse gesture)
+# INPUT (mouse)
 # =========================
 DEADZONE = 3
 WINDOW_MS = 55
 SMOOTH = 0.35
 MAX_MAG = 40.0
 
-TRIGGER_UP = 22       # flap (UP)
+TRIGGER_UP = 22
 RELEASE_UP = 10
 COOLDOWN_MS = 160
-
-START_TRIGGER = 8     # qualquer movimento acima disso inicia o jogo (0..100)
 
 def achar_mouse():
     best = None
@@ -25,19 +23,22 @@ def achar_mouse():
     for path in list_devices():
         dev = InputDevice(path)
         caps = dev.capabilities(verbose=False)
+
         tem_rel = ecodes.EV_REL in caps and any(
             c in caps[ecodes.EV_REL] for c in (ecodes.REL_X, ecodes.REL_Y)
         )
         if not tem_rel:
             continue
+
         tem_btn = ecodes.EV_KEY in caps and ecodes.BTN_LEFT in caps[ecodes.EV_KEY]
         score = 2 if tem_btn else 1
+
         if score > best_score:
             best_score = score
             best = dev
     return best
 
-class Gesture:
+class MouseGesture:
     def __init__(self, dev):
         self.dev = dev
         self.acc_dx = 0
@@ -45,8 +46,13 @@ class Gesture:
         self.sm_dx = 0.0
         self.sm_dy = 0.0
         self.last_emit = time.monotonic()
+
         self.last_fire = 0.0
         self.armed = True
+
+        # últimos valores publicados (para diagnóstico)
+        self.last_any = 0
+        self.last_up = 0
 
         if self.dev:
             try:
@@ -61,7 +67,6 @@ class Gesture:
     def _drain(self):
         if not self.dev:
             return
-
         while True:
             r, _, _ = select.select([self.dev.fd], [], [], 0)
             if not r:
@@ -80,15 +85,25 @@ class Gesture:
 
     def poll(self):
         """
-        Retorna (moved_intensity, flap_bool)
-        - moved_intensity: 0..100 (movimento geral, qualquer direção) por janela
-        - flap_bool: True quando detectar UP acima do limiar com cooldown
+        Retorna dict:
+        {
+          any_int: 0..100,
+          up_int: 0..100,
+          sm_dx, sm_dy: float,
+          flap: bool
+        }
         """
         self._drain()
 
         now = time.monotonic()
         if (now - self.last_emit) * 1000.0 < WINDOW_MS:
-            return 0, False
+            return {
+                "any_int": self.last_any,
+                "up_int": self.last_up,
+                "sm_dx": self.sm_dx,
+                "sm_dy": self.sm_dy,
+                "flap": False,
+            }
         self.last_emit = now
 
         dx = 0 if abs(self.acc_dx) < DEADZONE else self.acc_dx
@@ -99,15 +114,15 @@ class Gesture:
         self.sm_dx = (1.0 - SMOOTH) * self.sm_dx + SMOOTH * dx
         self.sm_dy = (1.0 - SMOOTH) * self.sm_dy + SMOOTH * dy
 
-        # intensidade geral (qualquer direção)
         mag_any = math.sqrt(self.sm_dx * self.sm_dx + self.sm_dy * self.sm_dy)
-        moved_int = self._norm_0_100(mag_any)
+        any_int = self._norm_0_100(mag_any)
 
-        # flap = UP (dy negativo geralmente é "subiu")
+        up_int = 0
         flap = False
+
+        # dy negativo normalmente = "subiu"
         if self.sm_dy < 0:
-            up_mag = abs(self.sm_dy)
-            up_int = self._norm_0_100(up_mag)
+            up_int = self._norm_0_100(abs(self.sm_dy))
 
             if up_int <= RELEASE_UP:
                 self.armed = True
@@ -118,11 +133,19 @@ class Gesture:
                     self.armed = False
                     flap = True
         else:
-            # rearma quando estabilizar
             if abs(self.sm_dy) < 1:
                 self.armed = True
 
-        return moved_int, flap
+        self.last_any = any_int
+        self.last_up = up_int
+
+        return {
+            "any_int": any_int,
+            "up_int": up_int,
+            "sm_dx": self.sm_dx,
+            "sm_dy": self.sm_dy,
+            "flap": flap,
+        }
 
 # =========================
 # GAME
@@ -141,10 +164,47 @@ BIRD_X = 10
 def clamp(v, a, b):
     return a if v < a else b if v > b else v
 
-def main(stdscr):
-    curses.curs_set(0)
+def diag_screen(stdscr, dev, gest):
     stdscr.nodelay(True)
     stdscr.keypad(True)
+
+    h, w = stdscr.getmaxyx()
+
+    while True:
+        stdscr.erase()
+        stdscr.addstr(0, 2, "DIAGNOSTICO DO MOUSE (antes do jogo)")
+        stdscr.addstr(1, 2, "ENTER inicia | Q sai | SPACE tambem vai pular no jogo")
+        stdscr.addstr(2, 2, "-" * (w - 4))
+
+        if dev:
+            stdscr.addstr(4, 2, f"Device: {dev.path}")
+            stdscr.addstr(5, 2, f"Nome:   {dev.name}")
+        else:
+            stdscr.addstr(4, 2, "Device: [NAO ENCONTRADO]")
+            stdscr.addstr(5, 2, "Dica: rode com sudo e/ou conecte o dispositivo que emula mouse")
+
+        info = gest.poll() if gest else {"any_int": 0, "up_int": 0, "sm_dx": 0.0, "sm_dy": 0.0, "flap": False}
+
+        stdscr.addstr(7, 2, f"any_int (0..100): {info['any_int']:3d}   (movimento geral)")
+        stdscr.addstr(8, 2, f"up_int  (0..100): {info['up_int']:3d}   (movimento UP)")
+        stdscr.addstr(10, 2, f"sm_dx: {info['sm_dx']:+8.2f}   sm_dy: {info['sm_dy']:+8.2f}")
+        stdscr.addstr(12, 2, f"flap detectado: {'SIM' if info['flap'] else 'nao'}")
+
+        stdscr.addstr(14, 2, "Ajustes relevantes:")
+        stdscr.addstr(15, 4, f"DEADZONE={DEADZONE}  TRIGGER_UP={TRIGGER_UP}  COOLDOWN_MS={COOLDOWN_MS}  MAX_MAG={MAX_MAG}")
+
+        stdscr.refresh()
+
+        k = stdscr.getch()
+        if k in (ord('q'), ord('Q')):
+            return False
+        if k in (10, 13):  # ENTER (LF/CR)
+            return True
+
+        time.sleep(0.01)
+
+def main(stdscr):
+    curses.curs_set(0)
 
     h, w = stdscr.getmaxyx()
     if h < 18 or w < 50:
@@ -154,24 +214,27 @@ def main(stdscr):
         return
 
     dev = achar_mouse()
-    gest = Gesture(dev)
+    gest = MouseGesture(dev) if dev else None
 
-    # chão e teto
+    # 1) DIAGNÓSTICO
+    ok = diag_screen(stdscr, dev, gest)
+    if not ok:
+        return
+
+    # 2) JOGO
+    stdscr.nodelay(True)
+    stdscr.keypad(True)
+
     top = 1
     bottom = h - 2
 
-    def reset():
-        return {
-            "bird_y": float(h // 2),
-            "bird_v": 0.0,
-            "score": 0,
-            "alive": True,
-            "pipes": [],
-            "spawn_t": 0.0,
-            "started": False,   # << inicia só após movimento
-        }
+    bird_y = float(h // 2)
+    bird_v = 0.0
+    score = 0
+    alive = True
 
-    state = reset()
+    pipes = []
+    spawn_t = 0.0
 
     def spawn_pipe():
         min_y = top + 2
@@ -180,21 +243,27 @@ def main(stdscr):
             gy = min_y
         else:
             gy = min_y + int((time.time() * 1000) % (max_y - min_y + 1))
-        state["pipes"].append({"x": float(w - 2), "gap_y": gy, "passed": False})
+        pipes.append({"x": float(w - 2), "gap_y": gy, "passed": False})
+
+    def collide_pipes(by):
+        for p in pipes:
+            px = int(round(p["x"]))
+            if px == BIRD_X:
+                gy = p["gap_y"]
+                if by < gy or by > gy + PIPE_GAP:
+                    return True
+        return False
 
     def draw():
         stdscr.erase()
+        ctrl = "mouse(UP)+SPACE" if dev else "SPACE"
+        stdscr.addstr(0, 2, f"Flappy Terminal | Score: {score} | Ctrl: {ctrl} | Q sai")
 
-        ctrl = "mouse" if dev else "teclado"
-        stdscr.addstr(0, 2, f"Flappy Terminal | Score: {state['score']} | Ctrl: {ctrl} | Q sai")
-
-        # bordas
         for x in range(w):
             stdscr.addch(top, x, "-")
             stdscr.addch(bottom, x, "-")
 
-        # pipes
-        for p in state["pipes"]:
+        for p in pipes:
             px = int(round(p["x"]))
             if 0 <= px < w:
                 gy = p["gap_y"]
@@ -203,30 +272,15 @@ def main(stdscr):
                     if y < gy or y > gap_bot:
                         stdscr.addch(y, px, "|")
 
-        # bird
-        by = int(round(state["bird_y"]))
+        by = int(round(bird_y))
         by = clamp(by, top + 1, bottom - 1)
         stdscr.addch(by, BIRD_X, "@")
 
-        if not state["started"] and state["alive"]:
-            msg = "MOVA o mouse (ou SPACE) para INICIAR"
-            stdscr.addstr(h // 2, max(0, (w - len(msg)) // 2), msg)
-
-        if not state["alive"]:
+        if not alive:
             msg = "GAME OVER - R reinicia | Q sai"
             stdscr.addstr(h // 2, max(0, (w - len(msg)) // 2), msg)
 
         stdscr.refresh()
-
-    def collide_pipes():
-        by = int(round(state["bird_y"]))
-        for p in state["pipes"]:
-            px = int(round(p["x"]))
-            if px == BIRD_X:
-                gy = p["gap_y"]
-                if by < gy or by > gy + PIPE_GAP:
-                    return True
-        return False
 
     last = time.monotonic()
     acc = 0.0
@@ -237,80 +291,66 @@ def main(stdscr):
         last = now
         acc += frame
 
-        key = stdscr.getch()
-        if key in (ord("q"), ord("Q")):
+        k = stdscr.getch()
+        if k in (ord('q'), ord('Q')):
             break
 
-        if not state["alive"]:
-            if key in (ord("r"), ord("R")):
-                state = reset()
-            draw()
-            time.sleep(0.01)
-            continue
+        flap = False
+        if alive:
+            if gest and gest.poll()["flap"]:
+                flap = True
+            if k == ord(' '):  # SPACE
+                flap = True
+        else:
+            if k in (ord('r'), ord('R')):
+                bird_y = float(h // 2)
+                bird_v = 0.0
+                score = 0
+                pipes.clear()
+                spawn_t = 0.0
+                alive = True
 
-        moved_int, flap_mouse = gest.poll()
-        flap_key = (key == ord(" "))
-
-        # START gate: qualquer movimento inicia (ou SPACE)
-        if (not state["started"]) and (moved_int >= START_TRIGGER or flap_key or flap_mouse):
-            state["started"] = True
-            # se iniciou com flap, aplica já
-            if flap_key or flap_mouse:
-                state["bird_v"] = FLAP_V
-
-        # se não começou ainda: pássaro fica parado
-        if not state["started"]:
-            draw()
-            time.sleep(0.01)
-            continue
-
-        # flap normal (após começar)
-        flap = flap_mouse or flap_key
-
-        # simulação em passos fixos
         while acc >= DT:
             acc -= DT
 
-            # física
-            state["bird_v"] += GRAVITY * DT
-            if flap:
-                state["bird_v"] = FLAP_V
-                flap = False
-            state["bird_y"] += state["bird_v"] * DT
+            if alive:
+                bird_v += GRAVITY * DT
+                if flap:
+                    bird_v = FLAP_V
+                    flap = False
+                bird_y += bird_v * DT
 
-            # NÃO PERDE NO CHÃO: trava no chão e zera velocidade
-            if state["bird_y"] >= bottom - 1:
-                state["bird_y"] = float(bottom - 1)
-                if state["bird_v"] > 0:
-                    state["bird_v"] = 0.0
+                # NÃO PERDE NO CHÃO: trava no chão
+                if bird_y >= bottom - 1:
+                    bird_y = float(bottom - 1)
+                    if bird_v > 0:
+                        bird_v = 0.0
 
-            # opcional: perde no teto (mantive)
-            if state["bird_y"] <= top + 1:
-                state["alive"] = False
-                break
+                # perde no teto (mantido)
+                if bird_y <= top + 1:
+                    alive = False
+                    break
 
-            # pipes
-            state["spawn_t"] += DT
-            if state["spawn_t"] >= PIPE_SPAWN:
-                state["spawn_t"] = 0.0
-                spawn_pipe()
+                spawn_t += DT
+                if spawn_t >= PIPE_SPAWN:
+                    spawn_t = 0.0
+                    spawn_pipe()
 
-            for p in state["pipes"]:
-                p["x"] -= PIPE_SPEED * DT
+                for p in pipes:
+                    p["x"] -= PIPE_SPEED * DT
 
-            while state["pipes"] and state["pipes"][0]["x"] < 0:
-                state["pipes"].pop(0)
+                while pipes and pipes[0]["x"] < 0:
+                    pipes.pop(0)
 
-            # score
-            for p in state["pipes"]:
-                if not p["passed"] and p["x"] < BIRD_X:
-                    p["passed"] = True
-                    state["score"] += 1
+                for p in pipes:
+                    if not p["passed"] and p["x"] < BIRD_X:
+                        p["passed"] = True
+                        score += 1
 
-            # colisão com cano
-            if collide_pipes():
-                state["alive"] = False
-                break
+                by = int(round(bird_y))
+                if collide_pipes(by):
+                    alive = False
+                    break
 
         draw()
         time.sleep(0.001)
