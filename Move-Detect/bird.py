@@ -41,7 +41,6 @@ def norm_0_100(mag):
 class EdgeFlap:
     def __init__(self, dev):
         self.dev = dev
-        self.dev.set_nonblocking(True)
         self.acc_dx = 0
         self.acc_dy = 0
         self.sm_dx = 0.0

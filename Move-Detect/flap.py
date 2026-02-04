@@ -30,7 +30,6 @@ def main():
         print("[ERRO] sem REL_X/REL_Y")
         return
 
-    dev.set_nonblocking(True)
     print(f"[OK] {dev.path} | {dev.name}")
 
     acc_dx = acc_dy = 0
