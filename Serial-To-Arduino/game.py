@@ -92,7 +92,7 @@ def animacao_vitoria():
 # LÓGICA DE JOGO
 # =========================
 print("\n=== JOGO MATRIZ LED (MODO RESET) ===")
-print("W A S D mover | X marcar | Q sair\n")
+print("W A S D mover | ENTER marcar | P pausar\n")
 
 # Sorteio inicial
 limpar_matriz()
@@ -113,15 +113,18 @@ try:
     while True:
         cmd = getch().upper()
 
-        if cmd == "Q": break
+        if cmd in ("\r", "\n"):
+            cmd = "ENTER"
+
+        if cmd == "P": break
 
         # Começou a jogar: apaga a memória
-        if not jogo_iniciado and cmd in ("W", "A", "S", "D", "X"):
+        if not jogo_iniciado and cmd in ("W", "A", "S", "D", "ENTER"):
             limpar_matriz()
             acender_led(linha, coluna, COR_JOGADOR)
             jogo_iniciado = True
 
-        if cmd == "X":
+        if cmd == "ENTER":
             if (linha, coluna) in leds_memoria:
                 if (linha, coluna) not in acertos:
                     acertos.add((linha, coluna))
