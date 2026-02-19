@@ -243,13 +243,14 @@ def main(stdscr):
             return
 
         # qualquer tecla inicia o jogo (inclusive Enter, espaço etc.)
-        if k != -1:
+        if k != -1 or cont >= 10:
             break
 
         flap = flap_in.poll()
         if flap:
             menu_state["bird_v"] = FLAP_V
             last_flap_flash = now
+            cont += 1
 
         while acc >= DT:
             acc -= DT
