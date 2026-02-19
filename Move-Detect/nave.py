@@ -62,51 +62,23 @@ class DirIntensityInput:
         mag_n = clamp(mag / MAX_MAG, 0.0, 1.0)
         return int(round(100.0 * math.sqrt(mag_n)))
 
-    def poll(self):
-        # drena tudo que estiver disponível sem travar
-        while True:
-            e = self.dev.read_one()
-            if e is None:
-                break
-            if e.type == ecodes.EV_REL:
-                if e.code == ecodes.REL_X:
-                    self.acc_dx += e.value
-                elif e.code == ecodes.REL_Y:
-                    self.acc_dy += e.value
+import select
 
-        now = time.monotonic()
-        if (now - self.last_emit) * 1000.0 < WINDOW_MS:
-            return None, 0
+def poll(self):
+    # só tenta ler se houver dados (non-blocking universal)
+    while True:
+        r, _, _ = select.select([self.dev.fd], [], [], 0)
+        if not r:
+            break
+        e = self.dev.read_one()
+        if e is None:
+            break
+        if e.type == ecodes.EV_REL:
+            if e.code == ecodes.REL_X:
+                self.acc_dx += e.value
+            elif e.code == ecodes.REL_Y:
+                self.acc_dy += e.value
 
-        # aplica janela
-        dx = 0 if abs(self.acc_dx) < DEADZONE else self.acc_dx
-        dy = 0 if abs(self.acc_dy) < DEADZONE else self.acc_dy
-        self.acc_dx = 0
-        self.acc_dy = 0
-        self.last_emit = now
-
-        # smoothing
-        self.sm_dx = (1.0 - SMOOTH) * self.sm_dx + SMOOTH * dx
-        self.sm_dy = (1.0 - SMOOTH) * self.sm_dy + SMOOTH * dy
-
-        if self.sm_dx == 0 and self.sm_dy == 0:
-            self.dir, self.intensity = None, 0
-            return None, 0
-
-        if abs(self.sm_dx) >= abs(self.sm_dy):
-            direcao = "RIGHT" if self.sm_dx > 0 else "LEFT"
-            mag = abs(self.sm_dx)
-        else:
-            direcao = "DOWN" if self.sm_dy > 0 else "UP"
-            mag = abs(self.sm_dy)
-
-        intenso = self._norm_0_100(mag)
-        if intenso <= 0:
-            self.dir, self.intensity = None, 0
-            return None, 0
-
-        self.dir, self.intensity = direcao, intenso
-        return direcao, intenso
 
 def draw_border(stdscr, h, w):
     # borda segura (evita addch no último canto)
@@ -136,8 +108,6 @@ def main(stdscr):
         time.sleep(2)
         return
 
-    # importante: coloca device em non-blocking (read_one)
-    dev.set_nonblocking(True)
 
     inp = DirIntensityInput(dev)
 
