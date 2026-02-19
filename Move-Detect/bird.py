@@ -232,6 +232,7 @@ def main(stdscr):
     last = time.monotonic()
     acc = 0.0
     last_flap_flash = 0.0  # pra mostrar "FLAP!" por pouco tempo
+    cont = 0
 
     while True:
         now = time.monotonic()
