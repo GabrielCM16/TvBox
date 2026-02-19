@@ -2,27 +2,30 @@
 import time, math, select
 from evdev import InputDevice, list_devices, ecodes
 
-DEADZONE = 3
-WINDOW_MS = 55
-SMOOTH = 0.20
-MAX_MAG = 40.0
-
-MIN_INT = 20          # precisa estar pelo menos nisso
-DELTA_TRIGGER = 18    # salto mínimo pra considerar "flap"
+DEADZONE = 1          # antes 3
+WINDOW_MS = 30        # antes 55 (mais responsivo)
+SMOOTH = 0.55         # antes 0.20 (menos “amarrado”)
 COOLDOWN_MS = 180
 
+# gatilhos no "mundo real" (bruto), não no 0..100
+MIN_SM_DY = 6.0       # intensidade mínima (ajuste fino)
+DELTA_SM_TRIGGER = 6.0 # salto mínimo (ajuste fino)
+
 def achar_mouse():
-    best = None
+    candidatos = []
     for path in list_devices():
         dev = InputDevice(path)
         caps = dev.capabilities(verbose=False)
-        if ecodes.EV_REL in caps and any(c in caps[ecodes.EV_REL] for c in (ecodes.REL_X, ecodes.REL_Y)):
-            best = dev
-    return best
-
-def norm_0_100(mag):
-    mag_n = max(0.0, min(1.0, mag / MAX_MAG))
-    return int(round(100.0 * math.sqrt(mag_n)))
+        tem_rel = ecodes.EV_REL in caps and any(
+            c in caps[ecodes.EV_REL] for c in (ecodes.REL_X, ecodes.REL_Y)
+        )
+        tem_btn = ecodes.EV_KEY in caps and ecodes.BTN_LEFT in caps[ecodes.EV_KEY]
+        if tem_rel:
+            candidatos.append((2 if tem_btn else 1, dev))
+    if not candidatos:
+        return None
+    candidatos.sort(key=lambda x: x[0], reverse=True)
+    return candidatos[0][1]
 
 def main():
     dev = achar_mouse()
@@ -36,10 +39,10 @@ def main():
     sm_dx = sm_dy = 0.0
     last_emit = time.monotonic()
     last_fire = 0.0
-    prev_vert = 0
+    prev_sm_abs_dy = 0.0
 
     while True:
-        # drain
+        # drena eventos disponíveis
         while True:
             r, _, _ = select.select([dev.fd], [], [], 0)
             if not r:
@@ -53,7 +56,7 @@ def main():
 
         now = time.monotonic()
         if (now - last_emit) * 1000.0 < WINDOW_MS:
-            time.sleep(0.005)
+            time.sleep(0.002)
             continue
         last_emit = now
 
@@ -64,19 +67,22 @@ def main():
         sm_dx = (1.0 - SMOOTH) * sm_dx + SMOOTH * dx
         sm_dy = (1.0 - SMOOTH) * sm_dy + SMOOTH * dy
 
-        vert = norm_0_100(abs(sm_dy))
-        anyi = norm_0_100(math.hypot(sm_dx, sm_dy))
-
-        delta = vert - prev_vert
-        prev_vert = vert
+        sm_abs_dy = abs(sm_dy)
+        delta_sm = sm_abs_dy - prev_sm_abs_dy
+        prev_sm_abs_dy = sm_abs_dy
 
         flap = False
-        if vert >= MIN_INT and delta >= DELTA_TRIGGER:
+        if sm_abs_dy >= MIN_SM_DY and delta_sm >= DELTA_SM_TRIGGER:
             if (now - last_fire) * 1000.0 >= COOLDOWN_MS:
                 last_fire = now
                 flap = True
 
-        print(f"any={anyi:3d} vert={vert:3d} delta={delta:4d}  {'FLAP!' if flap else ''}")
+        print(
+            f"raw(dx,dy)=({dx:+4},{dy:+4})  "
+            f"sm(dx,dy)=({sm_dx:+6.2f},{sm_dy:+6.2f})  "
+            f"|sm_dy|={sm_abs_dy:6.2f}  d={delta_sm:6.2f}  "
+            f"{'FLAP!' if flap else ''}"
+        )
 
 if __name__ == "__main__":
     main()
