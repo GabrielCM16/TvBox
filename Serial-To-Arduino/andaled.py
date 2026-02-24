@@ -2,153 +2,114 @@ import serial
 import serial.tools.list_ports
 import time
 import sys
-import tty      # Nativo do Linux
-import termios  # Nativo do Linux
-
-# =========================
-# CONFIGURAÇÕES
-# =========================
+import tty
+import termios
 
 MATRIZ_LINHAS = 8
 MATRIZ_COLUNAS = 8
 
-# Cores (RRRGGGBBB + I)
-COR_JOGADOR = "0002550001"   # verde
-COR_FIXO    = "2550000001"   # vermelho
-
-# =========================
-# FUNÇÃO PARA LER TECLA (LINUX)
-# =========================
+COR_JOGADOR = "0002550001"
+COR_FIXO    = "2550000001"
 
 def getch():
     fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
+    old = termios.tcgetattr(fd)
     try:
-        tty.setraw(sys.stdin.fileno())
-        ch = sys.stdin.read(1)
+        tty.setraw(fd)
+        return sys.stdin.read(1)
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    return ch
-
-# =========================
-# DETECÇÃO DO ARDUINO
-# =========================
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 def detectar_arduino():
     for p in serial.tools.list_ports.comports():
-        dev = p.device.lower()
-        desc = (p.description or "").lower()
-        if "acm" in dev or "arduino" in desc or "cdc" in desc:
+        if "ACM" in p.device or "USB" in p.device:
             return p.device
     return None
 
-porta = detectar_arduino()
-
-if not porta:
-    print("[ERRO] Arduino não encontrado \n-- Usando porta padrão")
-    porta = "/dev/ttyS2" # portas rx tx da placa da tv box
-    #sys.exit(1)
-
-print(f"[OK] Arduino detectado em {porta}")
+porta = detectar_arduino() or "/dev/ttyACM0"
+print("[PORTA]", porta)
 
 ser = serial.Serial(
     porta,
     115200,
-    timeout=0.05,
-    write_timeout=0.05,
-    exclusive=True
+    timeout=1,
+    write_timeout=1,
+    rtscts=False,
+    dsrdtr=False
 )
 
+# tempo real pro Arduino reiniciar
+time.sleep(3)
 
-time.sleep(2)
+# limpa qualquer lixo
+ser.reset_input_buffer()
 
-# =========================
-# FUNÇÕES DE LED
-# =========================
+# espera READY (boot do Arduino)
+print("[INFO] aguardando Arduino...")
+t0 = time.time()
+while time.time() - t0 < 5:
+    line = ser.readline().decode(errors="ignore").strip()
+    if line:
+        print("[ARDUINO]", line)
+        if "READY" in line:
+            break
 
-def apagar_led(l, c):
-    ser.write(f"{l}{c}\n".encode())
+def enviar(cmd):
+    msg = (cmd + "\n").encode()
+    ser.write(msg)
     ser.flush()
+    time.sleep(0.03)   # pacing importante em USB ruim
 
-def acender_led(l, c, cor):
-    ser.write(f"{l}{c}{cor}\n".encode())
-    ser.flush()
+    resp = []
+    t = time.time()
+    while time.time() - t < 0.5:
+        line = ser.readline().decode(errors="ignore").strip()
+        if line:
+            resp.append(line)
+    for r in resp:
+        print("[ARDUINO]", r)
 
+def apagar_led(l,c):
+    enviar(f"{l}{c}")
 
-def ler_retorno():
-    while ser.in_waiting > 0:
-        resp = ser.readline().decode(errors="ignore").strip()
-        if resp:
-            print(f"[ARDUINO] {resp}")
-
-
-# =========================
-# INICIALIZAÇÃO
-# =========================
+def acender_led(l,c,cor):
+    enviar(f"{l}{c}{cor}")
 
 print("\n=== JOGO MATRIZ LED ===")
-print("Controle: W A S D (Direto, sem Enter)")
-print("Pressione 'Q' para sair")
-print("=======================\n")
+print("WASD mover | Q sair\n")
 
-# Limpa matriz
-ser.write(b"CL\n")
-ler_retorno()
+# inicialização confiável
+enviar("CL")
+acender_led(5,5,COR_FIXO)
+acender_led(7,7,COR_FIXO)
 
-# LEDs fixos
-acender_led(5, 5, COR_FIXO)
-acender_led(7, 7, COR_FIXO)
-ler_retorno()
-
-# Jogador
 linha = 0
 coluna = 0
-acender_led(linha, coluna, COR_JOGADOR)
-ler_retorno()
-
-# =========================
-# LOOP PRINCIPAL
-# =========================
+acender_led(linha,coluna,COR_JOGADOR)
 
 try:
     while True:
         cmd = getch().upper()
 
-        if cmd == "Q" or cmd == "X":
+        if cmd == "Q":
             break
 
-        nova_linha = linha
-        nova_coluna = coluna
+        nl, nc = linha, coluna
+        if cmd=="W": nl-=1
+        elif cmd=="S": nl+=1
+        elif cmd=="A": nc-=1
+        elif cmd=="D": nc+=1
+        else: continue
 
-        if cmd == "W":
-            nova_linha -= 1
-        elif cmd == "S":
-            nova_linha += 1
-        elif cmd == "A":
-            nova_coluna -= 1
-        elif cmd == "D":
-            nova_coluna += 1
-        else:
-            # Ignora qualquer outra tecla silenciosamente
-            continue
-
-        # valida limites
-        if not (0 <= nova_linha < MATRIZ_LINHAS and 0 <= nova_coluna < MATRIZ_COLUNAS):
-            continue
-
-        # atualiza posição
-        apagar_led(linha, coluna)
-        linha, coluna = nova_linha, nova_coluna
-        acender_led(linha, coluna, COR_JOGADOR)
-
-        ler_retorno()
-        time.sleep(0.02)  # 20ms
-
+        if 0<=nl<MATRIZ_LINHAS and 0<=nc<MATRIZ_COLUNAS:
+            apagar_led(linha,coluna)
+            linha,coluna = nl,nc
+            acender_led(linha,coluna,COR_JOGADOR)
 
 except KeyboardInterrupt:
     pass
 
 finally:
-    ser.write(("CL\n").encode())
+    enviar("CL")
     ser.close()
-    print("\n[INFO] Conexão encerrada")
+    print("[INFO] encerrado")
