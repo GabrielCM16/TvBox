@@ -1,43 +1,12 @@
-import serial
-import serial.tools.list_ports
-import time
-import sys
+import serial, time
+ser = serial.Serial("/dev/ttyACM0", 115200, timeout=1)
+time.sleep(2.5)
+ser.reset_input_buffer()
 
-def detectar_arduino():
-    for p in serial.tools.list_ports.comports():
-        desc = (p.description or "").lower()
-        if "arduino" in desc or "cdc" in desc or "acm" in p.device.lower():
-            return p.device
-    return None
+ser.write(b"CL\n"); ser.flush()
+print("RX1:", ser.readline().decode(errors="ignore").strip())
 
-porta = detectar_arduino()
+ser.write(b"552550000001\n"); ser.flush()   # l=5 c=5 vermelho intensidade 1
+print("RX2:", ser.readline().decode(errors="ignore").strip())
 
-if not porta:
-    print("Arduino não encontrado")
-    porta = "/dev/ttyS2" # portas rx tx da placa da tv box
-    #sys.exit(1)
-
-print(f"Arduino em {porta}")
-
-ser = serial.Serial(porta, 9600, timeout=1)
-time.sleep(2)
-
-try:
-    while True:
-        cmd = input(">> ").strip().upper()
-
-        if cmd == "EXIT":
-            break
-
-        ser.write((cmd + "\n").encode())
-        resp = ser.readline().decode(errors="ignore").strip()
-
-        if resp:
-            print("Arduino:", resp)
-
-except KeyboardInterrupt:
-    pass
-
-finally:
-    ser.close()
-    print("Conexão encerrada")
+ser.close()
