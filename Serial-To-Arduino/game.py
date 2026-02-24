@@ -36,12 +36,19 @@ def getch():
 def detectar_arduino():
     for p in serial.tools.list_ports.comports():
         dev = p.device.lower()
-        desc = (p.description or "").lower()
-        if "acm" in dev or "arduino" in desc or "cdc" in desc:
+        if "/dev/ttyacm" in dev or "/dev/ttyusb" in dev:
             return p.device
     return None
 
-porta = detectar_arduino() or "/dev/ttyS2"
+porta = detectar_arduino()
+
+if not porta:
+    print("[ERRO] Arduino não encontrado \n-- Usando porta padrão")
+    porta = "/dev/ttyS2" # portas rx tx da placa da tv box
+    #sys.exit(1)
+
+print(f"[OK] Arduino detectado em {porta}")
+
 ser = serial.Serial(porta, 115200, timeout=0.05, write_timeout=0.05, exclusive=True)
 time.sleep(2)
 

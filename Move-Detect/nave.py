@@ -15,7 +15,7 @@ SHIP_CHAR = "A"
 FPS = 60.0
 DT = 1.0 / FPS
 
-BASE_STEP = 0.40   # passo base por “tick” de direção
+BASE_STEP = 0.55   # passo base por “tick” de direção
 GAIN = 1.50        # sensibilidade global
 
 def clamp(v, a, b):
