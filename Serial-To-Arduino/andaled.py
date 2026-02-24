@@ -55,8 +55,11 @@ while time.time() - t0 < 5:
             break
 
 def enviar(cmd):
-    ser.write((cmd+"\n").encode())
+    msg = (cmd+"\n").encode()
+    ser.write(msg)
     ser.flush()
+    ser.reset_output_buffer()
+    time.sleep(0.003)
 
 def apagar_led(l,c):
     enviar(f"{l}{c}")
