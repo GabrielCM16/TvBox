@@ -6,24 +6,20 @@ import tty
 import termios
 import random
 
-# =========================
-# CONFIGURAÇÕES
-# =========================
 MATRIZ_LINHAS = 8
 MATRIZ_COLUNAS = 8
 
-COR_JOGADOR     = "0002550001"  # verde
-COR_MEMORIA     = "2550000001"  # vermelho
-COR_SELECIONADO = "0000002551"  # azul
-COR_DERROTA     = "2551280001"  # laranja
-COR_VITORIA     = "2552552551"  # branco
+COR_JOGADOR     = "0002550001"
+COR_MEMORIA     = "2550000001"
+COR_SELECIONADO = "0000002551"
+COR_DERROTA     = "2551280001"
+COR_VITORIA     = "2552552551"
 
 QTD_LEDS_MEMORIA = 2
 MAX_ERROS = 3
 
-# =========================
-# FUNÇÕES DE APOIO
-# =========================
+USB_PACING = 0.003   # ESSENCIAL NA TV BOX
+
 def getch():
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
@@ -35,159 +31,156 @@ def getch():
 
 def detectar_arduino():
     for p in serial.tools.list_ports.comports():
-        dev = p.device.lower()
-        if "/dev/ttyacm" in dev or "/dev/ttyusb" in dev:
+        if "ACM" in p.device or "USB" in p.device:
             return p.device
-    return None
+    return "/dev/ttyACM0"
 
 porta = detectar_arduino()
+print("[PORTA]", porta)
 
-if not porta:
-    print("[ERRO] Arduino não encontrado \n-- Usando porta padrão")
-    porta = "/dev/ttyS2" # portas rx tx da placa da tv box
-    #sys.exit(1)
+ser = serial.Serial(porta,115200,timeout=1,write_timeout=1,rtscts=False,dsrdtr=False)
+time.sleep(3)
 
-print(f"[OK] Arduino detectado em {porta}")
+ser.reset_input_buffer()
 
-ser = serial.Serial(porta, 115200, timeout=0.05, write_timeout=0.05, exclusive=True)
-time.sleep(2)
+# aguarda READY
+t0=time.time()
+while time.time()-t0<4:
+    r=ser.readline().decode(errors="ignore").strip()
+    if r:
+        print("[ARDUINO]",r)
+        if "READY" in r:
+            break
 
-def apagar_led(l, c):
-    ser.write(f"{l}{c}\n".encode())
+# ---------- SERIAL SAFE ----------
+def enviar(cmd):
+    ser.write((cmd+"\n").encode())
     ser.flush()
+    time.sleep(USB_PACING)
 
-def acender_led(l, c, cor):
-    ser.write(f"{l}{c}{cor}\n".encode())
-    ser.flush()
+def apagar_led(l,c):
+    enviar(f"{l}{c}")
+
+def acender_led(l,c,cor):
+    enviar(f"{l}{c}{cor}")
 
 def limpar_matriz():
-    ser.write(b"CL\n")
-    ser.flush()
+    enviar("CL")
 
-# =========================
-# ANIMAÇÕES
-# =========================
+# ---------- ANIMAÇÕES ----------
+def preencher(cor):
+    for l in range(MATRIZ_LINHAS):
+        for c in range(MATRIZ_COLUNAS):
+            acender_led(l,c,cor)
+
 def animacao_derrota():
     for _ in range(2):
-        for l in range(MATRIZ_LINHAS):
-            for c in range(MATRIZ_COLUNAS):
-                acender_led(l, c, COR_DERROTA)
-        time.sleep(0.15)
+        preencher(COR_DERROTA)
+        time.sleep(0.12)
         limpar_matriz()
         time.sleep(0.1)
 
 def animacao_game_over():
     for _ in range(3):
-        for l in range(MATRIZ_LINHAS):
-            for c in range(MATRIZ_COLUNAS):
-                acender_led(l, c, COR_DERROTA)
-        time.sleep(0.3)
+        preencher(COR_DERROTA)
+        time.sleep(0.25)
         limpar_matriz()
         time.sleep(0.2)
 
 def animacao_vitoria():
     for _ in range(3):
         limpar_matriz()
-        time.sleep(0.15)
-        for l in range(MATRIZ_LINHAS):
-            for c in range(MATRIZ_COLUNAS):
-                acender_led(l, c, COR_VITORIA)
-        time.sleep(0.2)
+        time.sleep(0.12)
+        preencher(COR_VITORIA)
+        time.sleep(0.18)
     limpar_matriz()
 
-# =========================
-# LÓGICA DE JOGO
-# =========================
-print("\n=== JOGO MATRIZ LED (MODO RESET) ===")
-print("W A S D mover | ENTER marcar | P pausar\n")
+# ---------- JOGO ----------
+print("\n=== JOGO MATRIZ LED ===")
+print("WASD mover | ENTER marcar | P sair\n")
 
-# Sorteio inicial
 limpar_matriz()
-posicoes = random.sample(range(MATRIZ_LINHAS * MATRIZ_COLUNAS), QTD_LEDS_MEMORIA)
-leds_memoria = {(p // MATRIZ_COLUNAS, p % MATRIZ_COLUNAS) for p in posicoes}
 
-acertos = set()
-erros_totais = 0
-linha, coluna = 0, 0
-jogo_iniciado = False
+posicoes=random.sample(range(64),QTD_LEDS_MEMORIA)
+leds_memoria={(p//8,p%8) for p in posicoes}
 
-# Mostra memória inicial
-for (l, c) in leds_memoria:
-    acender_led(l, c, COR_MEMORIA)
-acender_led(linha, coluna, COR_JOGADOR)
+acertos=set()
+erros_totais=0
+linha,coluna=0,0
+jogo_iniciado=False
+
+# mostra memória
+for l,c in leds_memoria:
+    acender_led(l,c,COR_MEMORIA)
+
+acender_led(linha,coluna,COR_JOGADOR)
 
 try:
     while True:
-        cmd = getch().upper()
+        cmd=getch().upper()
 
-        if cmd in ("\r", "\n"):
-            cmd = "ENTER"
+        if cmd in ("\r","\n"):
+            cmd="ENTER"
 
-        if cmd == "P": break
+        if cmd=="P":
+            break
 
-        # Começou a jogar: apaga a memória
-        if not jogo_iniciado and cmd in ("W", "A", "S", "D", "ENTER"):
+        # primeira ação do jogador apaga memória
+        if not jogo_iniciado and cmd in ("W","A","S","D","ENTER"):
             limpar_matriz()
-            acender_led(linha, coluna, COR_JOGADOR)
-            jogo_iniciado = True
+            acender_led(linha,coluna,COR_JOGADOR)
+            jogo_iniciado=True
 
-        if cmd == "ENTER":
-            if (linha, coluna) in leds_memoria:
-                if (linha, coluna) not in acertos:
-                    acertos.add((linha, coluna))
-                    acender_led(linha, coluna, COR_SELECIONADO)
-                    
-                    # Vitória: acertou todos os sorteados
-                    if acertos == leds_memoria:
+        # seleção
+        if cmd=="ENTER":
+            if (linha,coluna) in leds_memoria:
+                if (linha,coluna) not in acertos:
+                    acertos.add((linha,coluna))
+                    acender_led(linha,coluna,COR_SELECIONADO)
+
+                    if acertos==leds_memoria:
                         animacao_vitoria()
                         break
             else:
-                # ERROU: Reset Total
-                erros_totais += 1
+                erros_totais+=1
                 animacao_derrota()
-                
-                if erros_totais >= MAX_ERROS:
-                    print("GAME OVER!")
+
+                if erros_totais>=MAX_ERROS:
+                    print("GAME OVER")
                     animacao_game_over()
                     break
-                
-                print(f"Erro {erros_totais}/{MAX_ERROS}! Resetando...")
-                # Reseta o progresso da rodada
+
+                print(f"Erro {erros_totais}/{MAX_ERROS}")
                 acertos.clear()
-                linha, coluna = 0, 0
-                jogo_iniciado = False
-                
-                # Mostra tudo de novo para o jogador decorar
+                linha,coluna=0,0
+                jogo_iniciado=False
+
                 limpar_matriz()
-                for (l, c) in leds_memoria:
-                    acender_led(l, c, COR_MEMORIA)
-                acender_led(linha, coluna, COR_JOGADOR)
+                for l,c in leds_memoria:
+                    acender_led(l,c,COR_MEMORIA)
+                acender_led(linha,coluna,COR_JOGADOR)
             continue
 
-        # MOVIMENTAÇÃO
-        nl, nc = linha, coluna
-        if cmd == "W": nl -= 1
-        elif cmd == "S": nl += 1
-        elif cmd == "A": nc -= 1
-        elif cmd == "D": nc += 1
+        # movimento
+        nl,nc=linha,coluna
+        if cmd=="W": nl-=1
+        elif cmd=="S": nl+=1
+        elif cmd=="A": nc-=1
+        elif cmd=="D": nc+=1
         else: continue
 
-        if 0 <= nl < MATRIZ_LINHAS and 0 <= nc < MATRIZ_COLUNAS:
-            # Apaga onde o jogador estava (se não era um acerto azul)
-            if (linha, coluna) not in acertos:
-                apagar_led(linha, coluna)
+        if 0<=nl<8 and 0<=nc<8:
+            if (linha,coluna) not in acertos:
+                apagar_led(linha,coluna)
             else:
-                acender_led(linha, coluna, COR_SELECIONADO)
+                acender_led(linha,coluna,COR_SELECIONADO)
 
-            linha, coluna = nl, nc
-            # Mostra o jogador na nova posição
-            acender_led(linha, coluna, COR_JOGADOR)
-
-        time.sleep(0.01)
+            linha,coluna=nl,nc
+            acender_led(linha,coluna,COR_JOGADOR)
 
 except KeyboardInterrupt:
     pass
 
 limpar_matriz()
 ser.close()
-print("[INFO] Jogo encerrado")
+print("[INFO] encerrado")
