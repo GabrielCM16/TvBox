@@ -55,19 +55,8 @@ while time.time() - t0 < 5:
             break
 
 def enviar(cmd):
-    msg = (cmd + "\n").encode()
-    ser.write(msg)
+    ser.write((cmd+"\n").encode())
     ser.flush()
-    time.sleep(0.03)   # pacing importante em USB ruim
-
-    resp = []
-    t = time.time()
-    while time.time() - t < 0.5:
-        line = ser.readline().decode(errors="ignore").strip()
-        if line:
-            resp.append(line)
-    for r in resp:
-        print("[ARDUINO]", r)
 
 def apagar_led(l,c):
     enviar(f"{l}{c}")
@@ -87,6 +76,10 @@ linha = 0
 coluna = 0
 acender_led(linha,coluna,COR_JOGADOR)
 
+def ler_retorno():
+    while ser.in_waiting:
+        print("[ARDUINO]", ser.readline().decode(errors="ignore").strip())
+
 try:
     while True:
         cmd = getch().upper()
@@ -99,12 +92,15 @@ try:
         elif cmd=="S": nl+=1
         elif cmd=="A": nc-=1
         elif cmd=="D": nc+=1
-        else: continue
+        else: 
+            continue
 
         if 0<=nl<MATRIZ_LINHAS and 0<=nc<MATRIZ_COLUNAS:
             apagar_led(linha,coluna)
             linha,coluna = nl,nc
             acender_led(linha,coluna,COR_JOGADOR)
+
+        ler_retorno()
 
 except KeyboardInterrupt:
     pass
