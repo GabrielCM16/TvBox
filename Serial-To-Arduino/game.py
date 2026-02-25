@@ -5,6 +5,7 @@ import sys
 import tty
 import termios
 import random
+import select
 
 MATRIZ_LINHAS = 8
 MATRIZ_COLUNAS = 8
@@ -15,8 +16,17 @@ COR_SELECIONADO = "0000002551"  # azul
 COR_X           = "2550000001"  # vermelho
 
 MAX_ERROS = 3
-USB_PACING = 0.004
 
+# pacing base + adaptativo (anti travamento)
+USB_PACING_BASE = 0.004
+USB_PACING_MAX  = 0.020
+usb_pacing = USB_PACING_BASE
+
+# heurística de “link degradado”
+timeout_streak = 0
+TIMEOUT_STREAK_RECONNECT = 10  # reconecta após N timeouts seguidos
+
+# ---------- TECLADO ----------
 def getch():
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
@@ -43,6 +53,27 @@ def read_key():
 
     return ch.upper()
 
+def drenar_teclado():
+    """
+    Remove teclas “acumuladas” quando o jogo ficou lento.
+    Não bloqueia.
+    """
+    try:
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            while True:
+                r, _, _ = select.select([sys.stdin], [], [], 0)
+                if not r:
+                    break
+                sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    except Exception:
+        pass
+
+# ---------- SERIAL ----------
 def detectar_arduino():
     for p in serial.tools.list_ports.comports():
         if "ACM" in p.device or "USB" in p.device:
@@ -52,41 +83,133 @@ def detectar_arduino():
 porta = detectar_arduino()
 print("[PORTA]", porta)
 
-ser = serial.Serial(
-    porta, 115200,
-    timeout=1,
-    write_timeout=2,
-    rtscts=False,
-    dsrdtr=False
-)
-time.sleep(3)
-ser.reset_input_buffer()
+def abrir_serial():
+    s = serial.Serial(
+        porta, 115200,
+        timeout=1,
+        write_timeout=2,
+        rtscts=False,
+        dsrdtr=False
+    )
+    time.sleep(2.5)
+    try:
+        s.reset_input_buffer()
+        s.reset_output_buffer()
+    except Exception:
+        pass
+    return s
 
+ser = abrir_serial()
+
+# tenta ler READY (sem depender disso 100%)
 t0 = time.time()
-while time.time() - t0 < 4:
-    r = ser.readline().decode(errors="ignore").strip()
-    if r:
-        print("[ARDUINO]", r)
-        if "READY" in r:
-            break
+while time.time() - t0 < 3.5:
+    try:
+        r = ser.readline().decode(errors="ignore").strip()
+        if r:
+            print("[ARDUINO]", r)
+            if "READY" in r:
+                break
+    except Exception:
+        break
+
+def drenar_serial(max_bytes=4096):
+    """
+    Evita acumular lixo/prints do Arduino no buffer.
+    """
+    try:
+        n = ser.in_waiting
+        if n:
+            ser.read(min(n, max_bytes))
+    except Exception:
+        pass
+
+def tentar_reconectar():
+    """
+    Recuperação automática sem reiniciar o jogo.
+    """
+    global ser, timeout_streak, usb_pacing
+    try:
+        print("[WARN] Reconectando serial...")
+        try:
+            ser.close()
+        except Exception:
+            pass
+        time.sleep(0.4)
+        ser = abrir_serial()
+        timeout_streak = 0
+        usb_pacing = min(USB_PACING_MAX, USB_PACING_BASE + 0.006)
+
+        # drena qualquer lixo inicial
+        t0 = time.time()
+        while time.time() - t0 < 1.0:
+            drenar_serial()
+            time.sleep(0.05)
+
+        print("[OK] Serial reconectada.")
+        return True
+    except Exception as e:
+        print("[ERRO] Falha ao reconectar:", e)
+        return False
 
 # ---------- SERIAL SAFE ----------
 def enviar(cmd, retries=3):
+    """
+    Envio robusto:
+    - pacing adaptativo
+    - drena buffer
+    - retry com backoff
+    - auto-reconnect ao detectar sequência de timeouts
+    """
+    global usb_pacing, timeout_streak
+
+    drenar_serial()
+
     data = (cmd + "\n").encode()
     for i in range(retries):
         try:
             ser.write(data)
             ser.flush()
-            time.sleep(USB_PACING)
+            time.sleep(usb_pacing)
+
+            # sucesso -> reduz pacing gradualmente
+            if usb_pacing > USB_PACING_BASE:
+                usb_pacing = max(USB_PACING_BASE, usb_pacing - 0.001)
+
+            timeout_streak = 0
             return True
+
         except serial.SerialTimeoutException:
+            timeout_streak += 1
+
+            # congestionou -> aumenta pacing + backoff
+            usb_pacing = min(USB_PACING_MAX, usb_pacing + 0.003)
             try:
                 ser.reset_output_buffer()
             except Exception:
                 pass
-            time.sleep(0.04 * (i + 1))
+
+            # se está muito degradado, limpa teclado e espera um pouco
+            drenar_teclado()
+            time.sleep(0.08 * (i + 1))
+
+            if timeout_streak >= TIMEOUT_STREAK_RECONNECT:
+                if tentar_reconectar():
+                    # após reconectar, tenta reenviar 1 vez
+                    try:
+                        ser.write(data)
+                        ser.flush()
+                        time.sleep(usb_pacing)
+                        return True
+                    except Exception:
+                        return False
+                return False
+
         except Exception:
-            time.sleep(0.03)
+            timeout_streak += 1
+            drenar_teclado()
+            time.sleep(0.06)
+
     return False
 
 def apagar_led(l, c):
@@ -116,10 +239,6 @@ def animacao_derrota_X():
     limpar_matriz()
 
 def desenhar_check_verde():
-    """
-    ✔ corrigido (espelhamento esq/dir): col = 7 - col
-    Poucos pixels (leve no serial).
-    """
     limpar_matriz()
     pts = [
         (5,1),(6,2),
@@ -127,23 +246,21 @@ def desenhar_check_verde():
         (4,5),(3,6),(2,7)
     ]
     for l, c in pts:
-        c = 7 - c  # <-- ESPELHA HORIZONTAL (corrige “ao contrário”)
+        c = 7 - c
         acender_led(l, c, COR_JOGADOR)
 
 def animacao_vitoria_lenta_verde():
-    # estilo do X: poucos frames, sem nada rápido
     desenhar_check_verde()
-    time.sleep(0.22)
+    time.sleep(0.24)
     limpar_matriz()
     time.sleep(0.12)
     desenhar_check_verde()
-    time.sleep(0.22)
+    time.sleep(0.24)
     limpar_matriz()
 
 def animacao_round_start(qtd):
     # leve e lenta (sem loop com sleeps curtos)
     limpar_matriz()
-    # mostra só 3 LEDs no topo como “nível”
     limite = min(qtd, 3)
     for c in range(limite):
         acender_led(0, c, COR_JOGADOR)
@@ -157,7 +274,6 @@ def memoria_inicial(qtd):
     return {(p // 8, p % 8) for p in pos}
 
 def memoria_adicionar_um(leds_memoria):
-    # adiciona 1 posição nova sem mexer nas antigas
     if len(leds_memoria) >= 64:
         return leds_memoria
     livres = [(l, c) for l in range(8) for c in range(8) if (l, c) not in leds_memoria]
@@ -167,13 +283,6 @@ def memoria_adicionar_um(leds_memoria):
 
 # ---------- JOGO (ROUND) ----------
 def loop_round(leds_memoria):
-    """
-    Executa 1 round com a memória atual.
-    Retorna:
-      True  -> ganhou
-      False -> perdeu (MAX_ERROS)
-      None  -> saiu (P)
-    """
     acertos = set()
     erros_totais = 0
     linha, coluna = 0, 0
@@ -186,6 +295,9 @@ def loop_round(leds_memoria):
     acender_led(linha, coluna, COR_JOGADOR)
 
     while True:
+        # drena “lixo” continuamente para não congestionar
+        drenar_serial()
+
         k = read_key()
         if not k:
             continue
@@ -221,7 +333,7 @@ def loop_round(leds_memoria):
                 if erros_totais >= MAX_ERROS:
                     return False
 
-                # reseta tentativa do round (mesma memória)
+                # reseta tentativa (mesma memória)
                 acertos.clear()
                 linha, coluna = 0, 0
                 jogo_iniciado = False
@@ -255,7 +367,6 @@ print("\n=== JOGO MATRIZ LED (MEMÓRIA CRESCENTE) ===")
 print("WASD mover (A/D invertidos) | Setas também | ENTER marcar | P sair\n")
 
 limpar_matriz()
-
 leds_memoria = memoria_inicial(2)
 
 try:
@@ -269,10 +380,9 @@ try:
 
         if resultado is True:
             animacao_vitoria_lenta_verde()
-            memoria_adicionar_um(leds_memoria)  # adiciona +1 sem mexer nos antigos
+            memoria_adicionar_um(leds_memoria)
             print(f"[OK] Vitória. Memória agora: {len(leds_memoria)} LEDs")
         else:
-            # perdeu -> reseta para 2 (com posições novas)
             desenhar_X(COR_X)
             time.sleep(0.30)
             limpar_matriz()
