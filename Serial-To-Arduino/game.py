@@ -156,18 +156,26 @@ def animacao_derrota_X():
     time.sleep(0.22)
     limpar_matriz()
 
-def animacao_vitoria_colorida():
-    # varredura colorida + flash
-    for cor in PALETA[:7]:
-        preencher(cor)
-        time.sleep(0.08)
-        limpar_matriz()
-        time.sleep(0.03)
-    for _ in range(2):
-        preencher("2552552551")
-        time.sleep(0.08)
-        limpar_matriz()
-        time.sleep(0.06)
+def desenhar_check(cor):
+    limpar_matriz()
+    # Um "✔" estilizado (8x8) - poucos pixels
+    pts = [
+        (5,1),(6,2),
+        (6,3),(5,4),
+        (4,5),(3,6),(2,7)
+    ]
+    for l,c in pts:
+        acender_led(l,c,cor)
+
+def animacao_vitoria_curta():
+    # 3 frames, timing parecido com o X (sem spam de serial)
+    desenhar_check("0002550001")      # verde
+    time.sleep(0.18)
+    desenhar_check("2552552551")      # branco
+    time.sleep(0.12)
+    desenhar_check("0002552551")      # ciano
+    time.sleep(0.16)
+    limpar_matriz()
 
 def animacao_round_start(qtd):
     # “carregando” discreto: barra na primeira linha com cores alternadas
@@ -299,7 +307,7 @@ try:
             break  # P
 
         if resultado is True:
-            animacao_vitoria_colorida()
+            animacao_vitoria_curta()
             nivel_leds = min(64, nivel_leds + 1)
             print(f"[OK] Vitória. Próximo nível: {nivel_leds} LEDs")
         else:
