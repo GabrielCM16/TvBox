@@ -212,14 +212,19 @@ def enviar(cmd, retries=3):
 
     return False
 
+def atualizar_oled(level, vidas, recorde):
+    # Formato: O + LL + V + RRRRR (L = level 2 dígitos, V = vidas 1 dígito, R = recorde 5 dígitos)
+    cmd = f"O{level:02d}{vidas:01d}{recorde:05d}"
+    enviar(cmd)
+
 def apagar_led(l, c):
-    enviar(f"{l}{c}")
+    enviar(f"M{l}{c}")
 
 def acender_led(l, c, cor):
-    enviar(f"{l}{c}{cor}")
+    enviar(f"M{l}{c}{cor}")
 
 def limpar_matriz():
-    enviar("CL")
+    enviar("MCL")
 
 # ---------- ANIMAÇÕES ----------
 def desenhar_X(cor):
@@ -288,6 +293,7 @@ def loop_round(leds_memoria):
     linha, coluna = 0, 0
     jogo_iniciado = False
 
+   
     # mostra memória
     for l, c in leds_memoria:
         acender_led(l, c, COR_MEMORIA)
@@ -332,6 +338,10 @@ def loop_round(leds_memoria):
 
                 if erros_totais >= MAX_ERROS:
                     return False
+                
+                # Atualiza display
+                atualizar_oled(len(leds_memoria), (MAX_ERROS - erros_totais), 00000)
+                time.sleep(1.0)
 
                 # reseta tentativa (mesma memória)
                 acertos.clear()
@@ -369,6 +379,11 @@ print("WASD mover (A/D invertidos) | Setas também | ENTER marcar | P sair\n")
 limpar_matriz()
 leds_memoria = memoria_inicial(2)
 
+# Atualiza display
+atualizar_oled(len(leds_memoria), MAX_ERROS, 00000)
+time.sleep(1.0)
+
+
 try:
     while True:
         animacao_round_start(len(leds_memoria))
@@ -382,6 +397,11 @@ try:
             animacao_vitoria_lenta_verde()
             memoria_adicionar_um(leds_memoria)
             print(f"[OK] Vitória. Memória agora: {len(leds_memoria)} LEDs")
+            
+            # Atualiza display
+            atualizar_oled(len(leds_memoria), (MAX_ERROS), 00000)
+            time.sleep(1.0)
+
         else:
             desenhar_X(COR_X)
             time.sleep(0.30)
