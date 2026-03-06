@@ -410,6 +410,10 @@ try:
             leds_memoria = memoria_inicial(2)
             print("[KO] Game Over. Reset para 2 LEDs")
 
+            # Atualiza display
+            atualizar_oled(len(leds_memoria), (MAX_ERROS), 00000)
+            time.sleep(1.0)
+
 except KeyboardInterrupt:
     pass
 finally:
