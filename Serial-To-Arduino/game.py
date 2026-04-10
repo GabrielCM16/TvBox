@@ -410,28 +410,33 @@ def run_cobrinha():
 
 DIGITOS = {
     "1": [
-        "010",
-        "110",
-        "010",
-        "010",
-        "111",
+        "00100",
+        "01100",
+        "00100",
+        "00100",
+        "00100",
+        "00100",
+        "01110",
     ],
     "2": [
-        "111",
-        "001",
-        "111",
-        "100",
-        "111",
+        "01110",
+        "10001",
+        "00001",
+        "00010",
+        "00100",
+        "01000",
+        "11111",
     ],
     "3": [
-        "111",
-        "001",
-        "111",
-        "001",
-        "111",
+        "11110",
+        "00001",
+        "00001",
+        "01110",
+        "00001",
+        "00001",
+        "11110",
     ],
 }
-
 
 JOGOS = [
     {"nome": "Memoria", "runner": run_memoria},
@@ -442,13 +447,23 @@ def desenhar_digito(digito, cor):
 
     grid = DIGITOS[str(digito)]
 
-    offset_l = 1  # centraliza vertical (8 - 5) / 2 ≈ 1
-    offset_c = 2  # centraliza horizontal (8 - 3) / 2 ≈ 2
+    altura = len(grid)      # 7
+    largura = len(grid[0])  # 5
 
-    for l in range(5):
-        for c in range(3):
+    offset_l = (8 - altura) // 2  # ≈ 0 ou 1
+    offset_c = (8 - largura) // 2 # ≈ 1
+
+    for l in range(altura):
+        for c in range(largura):
             if grid[l][c] == "1":
-                acender_led(l + offset_l, c + offset_c, cor)
+                # 🔥 CORREÇÃO: flip horizontal
+                c_corrigido = largura - 1 - c
+
+                acender_led(
+                    l + offset_l,
+                    c_corrigido + offset_c,
+                    cor
+                )
 
 
 def desenhar_menu(selecionado):
