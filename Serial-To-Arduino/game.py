@@ -6,6 +6,7 @@ import tty
 import termios
 import random
 import select
+import threading
 
 MATRIZ_LINHAS = 8
 MATRIZ_COLUNAS = 8
@@ -436,41 +437,44 @@ def render_full(cobra, comida):
         acender_led(comida[0], comida[1], COR_MEMORIA)
 
 # ---------- JOGO ----------
-def read_key_nonblock():
-    import sys, select, termios, tty
+direcao_atual = (0, 1)
+lock = threading.Lock()
+rodando = True
 
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
+def thread_input():
+    global direcao_atual, rodando
 
-    try:
-        tty.setraw(fd)
-        r, _, _ = select.select([sys.stdin], [], [], 0)
-        if not r:
-            return None
+    while rodando:
+        k = read_key()  # agora pode ser bloqueante
 
-        ch = sys.stdin.read(1)
+        if not k:
+            continue
 
-        if ch in ("\r", "\n"):
-            return "ENTER"
+        if k == "P":
+            rodando = False
+            return
 
-        if ch == "\x1b":
-            if sys.stdin.read(1) == "[":
-                ch3 = sys.stdin.read(1)
-                if ch3 == "A": return "UP"
-                if ch3 == "B": return "DOWN"
-                if ch3 == "C": return "RIGHT"
-                if ch3 == "D": return "LEFT"
-            return None
+        if k == "UP": k = "W"
+        elif k == "DOWN": k = "S"
+        elif k == "LEFT": k = "A"
+        elif k == "RIGHT": k = "D"
 
-        return ch.upper()
-
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        with lock:
+            if k == "W" and not direcao_oposta(direcao_atual, CIMA):
+                direcao_atual = CIMA
+            elif k == "S" and not direcao_oposta(direcao_atual, BAIXO):
+                direcao_atual = BAIXO
+            elif k == "A" and not direcao_oposta(direcao_atual, ESQ):
+                direcao_atual = ESQ
+            elif k == "D" and not direcao_oposta(direcao_atual, DIR):
+                direcao_atual = DIR
 
 
 def run_cobrinha():
+    global direcao_atual, rodando
+
     cobra = [(4,4), (4,3), (4,2)]
-    direcao = (0, 1)  # direita
+    direcao_atual = (0, 1)
     comida = gerar_comida(cobra)
 
     score = 0
@@ -478,48 +482,26 @@ def run_cobrinha():
 
     limpar_matriz()
 
-    ultimo_tick = time.time()
+    rodando = True
 
-    while True:
-        # ---------- INPUT NÃO BLOQUEANTE ----------
-        k = read_key_nonblock()
+    # inicia thread de input
+    t = threading.Thread(target=thread_input, daemon=True)
+    t.start()
 
-        if k:
-            if k == "P":
-                limpar_matriz()
-                return
+    while rodando:
+        inicio = time.time()
 
-            if k == "UP": k = "W"
-            elif k == "DOWN": k = "S"
-            elif k == "LEFT": k = "A"
-            elif k == "RIGHT": k = "D"
-
-            if k == "W" and not direcao_oposta(direcao, CIMA):
-                direcao = CIMA
-            elif k == "S" and not direcao_oposta(direcao, BAIXO):
-                direcao = BAIXO
-            elif k == "A" and not direcao_oposta(direcao, ESQ):
-                direcao = ESQ
-            elif k == "D" and not direcao_oposta(direcao, DIR):
-                direcao = DIR
-
-        # ---------- TICK FIXO ----------
-        agora = time.time()
-        if agora - ultimo_tick < tick_rate:
-            time.sleep(0.005)  # evita 100% CPU
-            continue
-
-        ultimo_tick = agora
+        # ---------- DIREÇÃO THREAD-SAFE ----------
+        with lock:
+            direcao = direcao_atual
 
         # ---------- UPDATE ----------
         head = cobra[0]
         nova = ((head[0] + direcao[0]) % 8, (head[1] + direcao[1]) % 8)
 
-        # colisão com corpo
         if nova in cobra:
             animacao_derrota_X()
-            limpar_matriz()
-            return
+            break
 
         cobra.insert(0, nova)
 
@@ -534,13 +516,22 @@ def run_cobrinha():
         # ---------- RENDER ----------
         acender_led(nova[0], nova[1], COR_JOGADOR)
 
-        # comida piscando
         if comida:
             if int(time.time() * 4) % 2 == 0:
                 acender_led(comida[0], comida[1], COR_MEMORIA)
             else:
                 apagar_led(comida[0], comida[1])
 
+        atualizar_oled(score, 0, 0)
+
+        # ---------- TIMING ----------
+        elapsed = time.time() - inicio
+        sleep_time = max(0, tick_rate - elapsed)
+        time.sleep(sleep_time)
+
+    # encerra
+    rodando = False
+    limpar_matriz()
 
 
 
