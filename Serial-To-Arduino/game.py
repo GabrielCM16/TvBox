@@ -412,40 +412,24 @@ BAIXO = (1, 0)
 ESQ   = (0, -1)
 DIR   = (0, 1)
 
-LINHAS = 8
-COLUNAS = 8
+direcao_atual = DIR
+lock = threading.Lock()
+rodando = True
 
 # ---------- UTIL ----------
-def wrap(pos):
-    return (pos[0] % LINHAS, pos[1] % COLUNAS)
-
 def gerar_comida(cobra):
-    livres = [(l, c) for l in range(LINHAS) for c in range(COLUNAS) if (l, c) not in cobra]
+    livres = [(l, c) for l in range(8) for c in range(8) if (l, c) not in cobra]
     return random.choice(livres) if livres else None
 
 def direcao_oposta(d1, d2):
     return (d1[0] + d2[0] == 0) and (d1[1] + d2[1] == 0)
 
-# ---------- RENDER INICIAL ----------
-def render_full(cobra, comida):
-    limpar_matriz()
-
-    for l, c in cobra:
-        acender_led(l, c, COR_JOGADOR)
-
-    if comida:
-        acender_led(comida[0], comida[1], COR_MEMORIA)
-
-# ---------- JOGO ----------
-direcao_atual = (0, 1)
-lock = threading.Lock()
-rodando = True
-
+# ---------- INPUT THREAD ----------
 def thread_input():
     global direcao_atual, rodando
 
     while rodando:
-        k = read_key()  # agora pode ser bloqueante
+        k = read_key()
 
         if not k:
             continue
@@ -456,8 +440,8 @@ def thread_input():
 
         if k == "UP": k = "W"
         elif k == "DOWN": k = "S"
-        elif k == "LEFT": k = "A"
-        elif k == "RIGHT": k = "D"
+        elif k == "LEFT": k = "D"
+        elif k == "RIGHT": k = "A"
 
         with lock:
             if k == "W" and not direcao_oposta(direcao_atual, CIMA):
@@ -469,12 +453,12 @@ def thread_input():
             elif k == "D" and not direcao_oposta(direcao_atual, DIR):
                 direcao_atual = DIR
 
-
+# ---------- JOGO ----------
 def run_cobrinha():
     global direcao_atual, rodando
 
     cobra = [(4,4), (4,3), (4,2)]
-    direcao_atual = (0, 1)
+    direcao_atual = DIR
     comida = gerar_comida(cobra)
 
     score = 0
@@ -484,21 +468,22 @@ def run_cobrinha():
 
     rodando = True
 
-    # inicia thread de input
+    # start input thread
     t = threading.Thread(target=thread_input, daemon=True)
     t.start()
 
     while rodando:
         inicio = time.time()
 
-        # ---------- DIREÇÃO THREAD-SAFE ----------
+        # direção atual
         with lock:
             direcao = direcao_atual
 
-        # ---------- UPDATE ----------
+        # movimento (com wrap-around)
         head = cobra[0]
         nova = ((head[0] + direcao[0]) % 8, (head[1] + direcao[1]) % 8)
 
+        # colisão
         if nova in cobra:
             animacao_derrota_X()
             break
@@ -517,22 +502,16 @@ def run_cobrinha():
         acender_led(nova[0], nova[1], COR_JOGADOR)
 
         if comida:
-            if int(time.time() * 4) % 2 == 0:
-                acender_led(comida[0], comida[1], COR_MEMORIA)
-            else:
-                apagar_led(comida[0], comida[1])
+            acender_led(comida[0], comida[1], COR_MEMORIA)
 
         atualizar_oled(score, 0, 0)
 
-        # ---------- TIMING ----------
+        # controle de tempo
         elapsed = time.time() - inicio
-        sleep_time = max(0, tick_rate - elapsed)
-        time.sleep(sleep_time)
+        time.sleep(max(0, tick_rate - elapsed))
 
-    # encerra
     rodando = False
     limpar_matriz()
-
 
 
 DIGITOS = {
