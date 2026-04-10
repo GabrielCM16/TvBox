@@ -372,57 +372,102 @@ def loop_round(leds_memoria):
             linha, coluna = nl, nc
             acender_led(linha, coluna, COR_JOGADOR)
 
-# ---------- MAIN ----------
-print("\n=== JOGO MATRIZ LED (MEMÓRIA CRESCENTE) ===")
-print("WASD mover (A/D invertidos) | Setas também | ENTER marcar | P sair\n")
 
-limpar_matriz()
-leds_memoria = memoria_inicial(2)
-
-# Atualiza display
-atualizar_oled(len(leds_memoria), MAX_ERROS, 00000)
-time.sleep(1.0)
+# =================================================
 
 
-try:
+
+def run_memoria():
+    leds_memoria = memoria_inicial(2)
+    # Atualiza display
+    atualizar_oled(len(leds_memoria), MAX_ERROS, 00000)
+    time.sleep(1.0)
+
     while True:
         animacao_round_start(len(leds_memoria))
 
         resultado = loop_round(leds_memoria)
 
         if resultado is None:
-            break
+            return  # volta pro menu
 
         if resultado is True:
             animacao_vitoria_lenta_verde()
             memoria_adicionar_um(leds_memoria)
-            print(f"[OK] Vitória. Memória agora: {len(leds_memoria)} LEDs")
-            
-            # Atualiza display
-            atualizar_oled(len(leds_memoria), (MAX_ERROS), 00000)
-            time.sleep(1.0)
 
         else:
             desenhar_X(COR_X)
-            time.sleep(0.30)
+            time.sleep(0.3)
             limpar_matriz()
-
             leds_memoria = memoria_inicial(2)
-            print("[KO] Game Over. Reset para 2 LEDs")
 
-            # Atualiza display
-            atualizar_oled(len(leds_memoria), (MAX_ERROS), 00000)
-            time.sleep(1.0)
+
+def run_cobrinha():
+    limpar_matriz()
+    print("[INFO] Snake ainda não implementado")
+    time.sleep(2)
+
+
+
+
+JOGOS = [
+    {"nome": "Memoria", "runner": run_memoria},
+    {"nome": "Snake",   "runner": run_cobrinha},
+]
+
+def desenhar_menu(selecionado):
+    limpar_matriz()
+
+    for i in range(len(JOGOS)):
+        cor = COR_SELECIONADO if i == selecionado else "0500500501"
+        
+        # desenha uma "coluna" representando o jogo
+        for l in range(8):
+            acender_led(l, i, cor)
+
+def loop_menu():
+    idx = 0
+    desenhar_menu(idx)
+
+    while True:
+        drenar_serial()
+        k = read_key()
+
+        if not k:
+            continue
+
+        if k == "LEFT":
+            idx = (idx - 1) % len(JOGOS)
+            desenhar_menu(idx)
+
+        elif k == "RIGHT":
+            idx = (idx + 1) % len(JOGOS)
+            desenhar_menu(idx)
+
+        elif k == "ENTER":
+            limpar_matriz()
+            return JOGOS[idx]["runner"]
+
+        elif k == "P":
+            return None
+
+
+
+# ---------- MAIN ----------
+
+print("\n=== SISTEMA DE JOGOS ===")
+
+try:
+    while True:
+        runner = loop_menu()
+
+        if runner is None:
+            break
+
+        runner()  # executa jogo selecionado
 
 except KeyboardInterrupt:
     pass
 finally:
-    try:
-        limpar_matriz()
-    except Exception:
-        pass
-    try:
-        ser.close()
-    except Exception:
-        pass
-    print("[INFO] encerrado")
+    limpar_matriz()
+    ser.close()
