@@ -436,56 +436,86 @@ def render_full(cobra, comida):
         acender_led(comida[0], comida[1], COR_MEMORIA)
 
 # ---------- JOGO ----------
+def read_key_nonblock():
+    import sys, select, termios, tty
+
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+
+    try:
+        tty.setraw(fd)
+        r, _, _ = select.select([sys.stdin], [], [], 0)
+        if not r:
+            return None
+
+        ch = sys.stdin.read(1)
+
+        if ch in ("\r", "\n"):
+            return "ENTER"
+
+        if ch == "\x1b":
+            if sys.stdin.read(1) == "[":
+                ch3 = sys.stdin.read(1)
+                if ch3 == "A": return "UP"
+                if ch3 == "B": return "DOWN"
+                if ch3 == "C": return "RIGHT"
+                if ch3 == "D": return "LEFT"
+            return None
+
+        return ch.upper()
+
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
 def run_cobrinha():
     cobra = [(4,4), (4,3), (4,2)]
-    direcao = DIR
+    direcao = (0, 1)  # direita
     comida = gerar_comida(cobra)
 
     score = 0
-    tick_rate = 0.22  # velocidade base mais natural
+    tick_rate = 0.22
 
     limpar_matriz()
 
     ultimo_tick = time.time()
 
     while True:
-        drenar_serial()
-        k = read_key()
+        # ---------- INPUT NÃO BLOQUEANTE ----------
+        k = read_key_nonblock()
 
-        # ---------- INPUT (NÃO BLOQUEIA MOVIMENTO) ----------
         if k:
             if k == "P":
                 limpar_matriz()
                 return
 
-            # normaliza setas
             if k == "UP": k = "W"
             elif k == "DOWN": k = "S"
             elif k == "LEFT": k = "A"
             elif k == "RIGHT": k = "D"
 
-            # DIREÇÃO CORRETA (fix aplicado)
             if k == "W" and not direcao_oposta(direcao, CIMA):
                 direcao = CIMA
             elif k == "S" and not direcao_oposta(direcao, BAIXO):
                 direcao = BAIXO
             elif k == "A" and not direcao_oposta(direcao, ESQ):
-                direcao = ESQ   # ← corrigido
+                direcao = ESQ
             elif k == "D" and not direcao_oposta(direcao, DIR):
-                direcao = DIR   # ← corrigido
+                direcao = DIR
 
-        # ---------- CONTROLE DE TICK ----------
+        # ---------- TICK FIXO ----------
         agora = time.time()
         if agora - ultimo_tick < tick_rate:
+            time.sleep(0.005)  # evita 100% CPU
             continue
 
         ultimo_tick = agora
 
         # ---------- UPDATE ----------
         head = cobra[0]
-        nova = wrap((head[0] + direcao[0], head[1] + direcao[1]))
+        nova = ((head[0] + direcao[0]) % 8, (head[1] + direcao[1]) % 8)
 
-        # colisão corpo
+        # colisão com corpo
         if nova in cobra:
             animacao_derrota_X()
             limpar_matriz()
@@ -496,8 +526,6 @@ def run_cobrinha():
         if nova == comida:
             score += 1
             comida = gerar_comida(cobra)
-
-            # aceleração progressiva
             tick_rate = max(0.08, tick_rate - 0.01)
         else:
             tail = cobra.pop()
@@ -506,14 +534,13 @@ def run_cobrinha():
         # ---------- RENDER ----------
         acender_led(nova[0], nova[1], COR_JOGADOR)
 
-        # ---------- COMIDA PISCANDO ----------
+        # comida piscando
         if comida:
-            if int(time.time() * 4) % 2 == 0:  # 4Hz blink
+            if int(time.time() * 4) % 2 == 0:
                 acender_led(comida[0], comida[1], COR_MEMORIA)
             else:
                 apagar_led(comida[0], comida[1])
 
-        atualizar_oled(score, 0, 0)
 
 
 
