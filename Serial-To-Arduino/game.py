@@ -442,25 +442,21 @@ def run_cobrinha():
     comida = gerar_comida(cobra)
 
     score = 0
-    tick_rate = 0.25
+    tick_rate = 0.22  # velocidade base mais natural
 
-    render_full(cobra, comida)
-    atualizar_oled(score, 0, 0)
+    limpar_matriz()
+
+    ultimo_tick = time.time()
 
     while True:
-        t0 = time.time()
+        drenar_serial()
+        k = read_key()
 
-        # ---------- INPUT WINDOW ----------
-        while time.time() - t0 < tick_rate:
-            drenar_serial()
-            k = read_key()
-
-            if not k:
-                continue
-
+        # ---------- INPUT (NÃO BLOQUEIA MOVIMENTO) ----------
+        if k:
             if k == "P":
                 limpar_matriz()
-                return  # volta pro menu
+                return
 
             # normaliza setas
             if k == "UP": k = "W"
@@ -468,21 +464,28 @@ def run_cobrinha():
             elif k == "LEFT": k = "A"
             elif k == "RIGHT": k = "D"
 
-            # mudança de direção (com anti-reversão)
+            # DIREÇÃO CORRETA (fix aplicado)
             if k == "W" and not direcao_oposta(direcao, CIMA):
                 direcao = CIMA
             elif k == "S" and not direcao_oposta(direcao, BAIXO):
                 direcao = BAIXO
             elif k == "A" and not direcao_oposta(direcao, ESQ):
-                direcao = ESQ
+                direcao = ESQ   # ← corrigido
             elif k == "D" and not direcao_oposta(direcao, DIR):
-                direcao = DIR
+                direcao = DIR   # ← corrigido
+
+        # ---------- CONTROLE DE TICK ----------
+        agora = time.time()
+        if agora - ultimo_tick < tick_rate:
+            continue
+
+        ultimo_tick = agora
 
         # ---------- UPDATE ----------
         head = cobra[0]
         nova = wrap((head[0] + direcao[0], head[1] + direcao[1]))
 
-        # colisão com o próprio corpo
+        # colisão corpo
         if nova in cobra:
             animacao_derrota_X()
             limpar_matriz()
@@ -490,29 +493,27 @@ def run_cobrinha():
 
         cobra.insert(0, nova)
 
-        # comeu comida?
         if nova == comida:
             score += 1
             comida = gerar_comida(cobra)
 
             # aceleração progressiva
             tick_rate = max(0.08, tick_rate - 0.01)
-
         else:
             tail = cobra.pop()
             apagar_led(tail[0], tail[1])
 
-        # ---------- RENDER INCREMENTAL ----------
-        # cabeça nova
+        # ---------- RENDER ----------
         acender_led(nova[0], nova[1], COR_JOGADOR)
 
-        # comida
+        # ---------- COMIDA PISCANDO ----------
         if comida:
-            acender_led(comida[0], comida[1], COR_MEMORIA)
+            if int(time.time() * 4) % 2 == 0:  # 4Hz blink
+                acender_led(comida[0], comida[1], COR_MEMORIA)
+            else:
+                apagar_led(comida[0], comida[1])
 
-        # display
         atualizar_oled(score, 0, 0)
-
 
 
 
