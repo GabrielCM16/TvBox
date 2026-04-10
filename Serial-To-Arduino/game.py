@@ -493,18 +493,22 @@ def run_cobrinha():
         if nova == comida:
             score += 1
             comida = gerar_comida(cobra)
-            tick_rate = max(0.08, tick_rate - 0.01)
         else:
             tail = cobra.pop()
             apagar_led(tail[0], tail[1])
 
         # ---------- RENDER ----------
-        acender_led(nova[0], nova[1], COR_JOGADOR)
+        COR_CABECA = "0002552551"  # ciano (destaca bem)
+
+        # cabeça
+        acender_led(cobra[0][0], cobra[0][1], COR_CABECA)
+
+        # corpo (opcional, só se quiser reforçar)
+        for l, c in cobra[1:]:
+            acender_led(l, c, COR_JOGADOR)
 
         if comida:
             acender_led(comida[0], comida[1], COR_MEMORIA)
-
-        atualizar_oled(score, 0, 0)
 
         # controle de tempo
         elapsed = time.time() - inicio
