@@ -403,10 +403,118 @@ def run_memoria():
             leds_memoria = memoria_inicial(2)
 
 
-def run_cobrinha():
+
+
+# Direções
+CIMA  = (-1, 0)
+BAIXO = (1, 0)
+ESQ   = (0, -1)
+DIR   = (0, 1)
+
+LINHAS = 8
+COLUNAS = 8
+
+# ---------- UTIL ----------
+def wrap(pos):
+    return (pos[0] % LINHAS, pos[1] % COLUNAS)
+
+def gerar_comida(cobra):
+    livres = [(l, c) for l in range(LINHAS) for c in range(COLUNAS) if (l, c) not in cobra]
+    return random.choice(livres) if livres else None
+
+def direcao_oposta(d1, d2):
+    return (d1[0] + d2[0] == 0) and (d1[1] + d2[1] == 0)
+
+# ---------- RENDER INICIAL ----------
+def render_full(cobra, comida):
     limpar_matriz()
-    print("[INFO] Snake ainda não implementado")
-    time.sleep(2)
+
+    for l, c in cobra:
+        acender_led(l, c, COR_JOGADOR)
+
+    if comida:
+        acender_led(comida[0], comida[1], COR_MEMORIA)
+
+# ---------- JOGO ----------
+def run_cobrinha():
+    cobra = [(4,4), (4,3), (4,2)]
+    direcao = DIR
+    comida = gerar_comida(cobra)
+
+    score = 0
+    tick_rate = 0.25
+
+    render_full(cobra, comida)
+    atualizar_oled(score, 0, 0)
+
+    while True:
+        t0 = time.time()
+
+        # ---------- INPUT WINDOW ----------
+        while time.time() - t0 < tick_rate:
+            drenar_serial()
+            k = read_key()
+
+            if not k:
+                continue
+
+            if k == "P":
+                limpar_matriz()
+                return  # volta pro menu
+
+            # normaliza setas
+            if k == "UP": k = "W"
+            elif k == "DOWN": k = "S"
+            elif k == "LEFT": k = "A"
+            elif k == "RIGHT": k = "D"
+
+            # mudança de direção (com anti-reversão)
+            if k == "W" and not direcao_oposta(direcao, CIMA):
+                direcao = CIMA
+            elif k == "S" and not direcao_oposta(direcao, BAIXO):
+                direcao = BAIXO
+            elif k == "A" and not direcao_oposta(direcao, ESQ):
+                direcao = ESQ
+            elif k == "D" and not direcao_oposta(direcao, DIR):
+                direcao = DIR
+
+        # ---------- UPDATE ----------
+        head = cobra[0]
+        nova = wrap((head[0] + direcao[0], head[1] + direcao[1]))
+
+        # colisão com o próprio corpo
+        if nova in cobra:
+            animacao_derrota_X()
+            limpar_matriz()
+            return
+
+        cobra.insert(0, nova)
+
+        # comeu comida?
+        if nova == comida:
+            score += 1
+            comida = gerar_comida(cobra)
+
+            # aceleração progressiva
+            tick_rate = max(0.08, tick_rate - 0.01)
+
+        else:
+            tail = cobra.pop()
+            apagar_led(tail[0], tail[1])
+
+        # ---------- RENDER INCREMENTAL ----------
+        # cabeça nova
+        acender_led(nova[0], nova[1], COR_JOGADOR)
+
+        # comida
+        if comida:
+            acender_led(comida[0], comida[1], COR_MEMORIA)
+
+        # display
+        atualizar_oled(score, 0, 0)
+
+
+
 
 DIGITOS = {
     "1": [
@@ -456,7 +564,6 @@ def desenhar_digito(digito, cor):
     for l in range(altura):
         for c in range(largura):
             if grid[l][c] == "1":
-                # 🔥 CORREÇÃO: flip horizontal
                 c_corrigido = largura - 1 - c
 
                 acender_led(
