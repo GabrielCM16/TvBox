@@ -360,6 +360,7 @@ def loop_round(leds_memoria):
         elif k == "S": nl += 1
         elif k == "A": nc += 1   # A -> direita
         elif k == "D": nc -= 1   # D -> esquerda
+        elif k == "P": return None
         else:
             continue
 
@@ -407,23 +408,53 @@ def run_cobrinha():
     print("[INFO] Snake ainda não implementado")
     time.sleep(2)
 
-
+DIGITOS = {
+    "1": [
+        "010",
+        "110",
+        "010",
+        "010",
+        "111",
+    ],
+    "2": [
+        "111",
+        "001",
+        "111",
+        "100",
+        "111",
+    ],
+    "3": [
+        "111",
+        "001",
+        "111",
+        "001",
+        "111",
+    ],
+}
 
 
 JOGOS = [
     {"nome": "Memoria", "runner": run_memoria},
     {"nome": "Snake",   "runner": run_cobrinha},
 ]
-
-def desenhar_menu(selecionado):
+def desenhar_digito(digito, cor):
     limpar_matriz()
 
-    for i in range(len(JOGOS)):
-        cor = COR_SELECIONADO if i == selecionado else "0500500501"
-        
-        # desenha uma "coluna" representando o jogo
-        for l in range(8):
-            acender_led(l, i, cor)
+    grid = DIGITOS[str(digito)]
+
+    offset_l = 1  # centraliza vertical (8 - 5) / 2 ≈ 1
+    offset_c = 2  # centraliza horizontal (8 - 3) / 2 ≈ 2
+
+    for l in range(5):
+        for c in range(3):
+            if grid[l][c] == "1":
+                acender_led(l + offset_l, c + offset_c, cor)
+
+
+def desenhar_menu(selecionado):
+    cor = COR_SELECIONADO
+    desenhar_digito(selecionado + 1, cor)
+
 
 def loop_menu():
     idx = 0
@@ -436,11 +467,11 @@ def loop_menu():
         if not k:
             continue
 
-        if k == "LEFT":
+        if k in ("LEFT", "A"):
             idx = (idx - 1) % len(JOGOS)
             desenhar_menu(idx)
 
-        elif k == "RIGHT":
+        elif k in ("RIGHT", "D"):
             idx = (idx + 1) % len(JOGOS)
             desenhar_menu(idx)
 
